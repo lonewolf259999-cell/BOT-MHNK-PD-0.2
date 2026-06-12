@@ -1,7 +1,22 @@
 import { google, sheets_v4 } from 'googleapis';
+import fs from 'fs';
+import path from 'path';
 import { cache } from './cache';
 import { CACHE } from '../config';
-import credentials from '../../credentials.json';
+
+interface CredentialsFile {
+    client_email: string;
+    private_key: string;
+    type: string;
+    project_id: string;
+    private_key_id: string;
+    client_id: string;
+    auth_uri: string;
+    token_uri: string;
+    auth_provider_x509_cert_url: string;
+    client_x509_cert_url: string;
+    universe_domain: string;
+}
 
 /**
  * Centralized Google Sheets service with retry, rate limiting, and cache.
@@ -9,12 +24,14 @@ import credentials from '../../credentials.json';
  */
 export class SheetService {
     private auth: sheets_v4.Sheets | null = null;
-    private keys: { client_email: string; private_key: string };
+    private keys: CredentialsFile;
     private lastRequestTime = 0;
     private readonly MIN_REQUEST_INTERVAL = 100; // 100ms between calls
 
     constructor() {
-        this.keys = credentials;
+        const credPath = path.join(__dirname, '../../credentials.json');
+        const raw = fs.readFileSync(credPath, 'utf8');
+        this.keys = JSON.parse(raw) as CredentialsFile;
     }
 
     private getClient(): sheets_v4.Sheets {
@@ -51,7 +68,7 @@ export class SheetService {
         await this.throttle();
         const client = this.getClient();
         const res = await client.spreadsheets.values.get({ spreadsheetId, range });
-        const data = res.data.values as string[][] || [];
+        const data = (res.data.values as string[][]) || [];
 
         cache.set(cacheKey, data, ttl ?? CACHE.SHEET_TTL);
         return data;
@@ -114,8 +131,6 @@ export class SheetService {
     }
 
     private invalidateCache(spreadsheetId: string): void {
-        // Invalidate all cache entries for this spreadsheet
-        // Simple approach: clear all (can be optimized)
         cache.clear();
     }
 }
