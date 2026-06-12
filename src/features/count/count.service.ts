@@ -1,6 +1,6 @@
 import { sheetService } from '../../core/sheet.service';
 import { configService } from '../../core/config.service';
-import { normalizeName } from '../../services/utils';
+import { normalizeName, replyAndDelete } from '../../services/utils';
 import { logger } from '../../core/logger';
 
 export async function processCountBatch(tags: { id: string; nickname: string; username: string }[], channelId: string, isDelete: boolean): Promise<void> {
@@ -25,7 +25,11 @@ export async function processCountBatch(tags: { id: string; nickname: string; us
 
 export async function manualRecount(client: any, interaction: any): Promise<void> {
     const cfg = configService.getCountConfig();
-    if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) { await interaction.editReply({ content: '❌ ยังไม่ได้ตั้งค่า' }); return; }
+    if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) {
+        try { await interaction.deferReply({ flags: 64 }).catch(() => {}); await interaction.editReply({ content: '❌ ยังไม่ได้ตั้งค่า' }); } catch {}
+        return;
+    }
+    try { await interaction.deferReply({ flags: 64 }).catch(() => {}); } catch { return; }
     await sheetService.clearValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!C4:G`);
     let rows = await sheetService.getValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A:G`, 0) || [];
     for (let i = 3; i < rows.length; i++) { if (rows[i]) for (let c = 2; c <= 6; c++) if (rows[i].length > c) rows[i][c] = ''; }
@@ -58,5 +62,6 @@ export async function manualRecount(client: any, interaction: any): Promise<void
         }
     }
     await sheetService.updateValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A1`, rows);
+    await replyAndDelete(interaction, `✅ นับข้อความเก่าเสร็จ: ${total} ข้อความ`);
     logger.info('นับเคส', `นับข้อความเก่าเสร็จ: ${total} ข้อความ`);
 }

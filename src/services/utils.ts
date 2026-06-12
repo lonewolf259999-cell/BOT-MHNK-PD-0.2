@@ -4,6 +4,17 @@ export function normalizeName(str: string): string {
     return (str || '').trim().toLowerCase();
 }
 
+/**
+ * Reply ephemeral then auto-delete after delay ms (default 5000).
+ * Same pattern as v0.1's ephemeral auto-delete.
+ */
+export async function replyAndDelete(interaction: any, content: string, delay = 5000): Promise<void> {
+    try {
+        await interaction.editReply({ content });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), delay);
+    } catch {}
+}
+
 export function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
