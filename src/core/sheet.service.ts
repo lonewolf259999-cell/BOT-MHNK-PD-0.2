@@ -1,7 +1,7 @@
 import { google, sheets_v4 } from 'googleapis';
-import path from 'path';
 import { cache } from './cache';
 import { CACHE } from '../config';
+import credentials from '../../credentials.json';
 
 /**
  * Centralized Google Sheets service with retry, rate limiting, and cache.
@@ -14,7 +14,7 @@ export class SheetService {
     private readonly MIN_REQUEST_INTERVAL = 100; // 100ms between calls
 
     constructor() {
-        this.keys = require(path.join(__dirname, '../../credentials.json'));
+        this.keys = credentials;
     }
 
     private getClient(): sheets_v4.Sheets {
