@@ -101,6 +101,9 @@ async function start(): Promise<void> {
     const { setupRecountFeature } = await import('./features/recount/listener');
     setupRecountFeature(client);
 
+    const { setupClearFeature } = await import('./features/clear/listener');
+    setupClearFeature(client);
+
     await client.login(env.botToken);
 }
 

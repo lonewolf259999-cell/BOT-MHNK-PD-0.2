@@ -33,7 +33,7 @@ export function setupRecountFeature(client: Client): void {
             if (!i.memberPermissions?.has('Administrator')) return i.reply({ content: '❌ เฉพาะผู้ดูแลระบบ', flags: MessageFlags.Ephemeral });
             await i.deferReply({ flags: MessageFlags.Ephemeral });
             await i.channel.send({ embeds: [createPanelEmbed()], components: buildPanelComponents() });
-            return i.editReply({ content: '✅ วางแผงควบคุมในห้องนี้แล้ว' });
+            return replyAndDelete(i, '✅ วางแผงควบคุมในห้องนี้แล้ว');
         }
 
         // ------------------------------------------

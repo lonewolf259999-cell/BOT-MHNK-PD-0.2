@@ -66,8 +66,7 @@ export function setupWelcomeFeature(client: Client): void {
                 if (logChId) {
                     const logCh = i.guild?.channels.cache.get(logChId);
                     if (logCh?.isTextBased()) {
-                        await logCh.send({ content: `<@${i.user.id}>`, embeds: [new EmbedBuilder().setColor('#a0c400').setTitle('📝 มีการลงทะเบียนใหม่ผ่านระบบสำเร็จ').setDescription(`ผู้ใช้งาน <@${i.user.id}> ลงทะเบียนเข้าสู่ระบบสำเร็จแล้ว`).addFields({ name: '🆔 Discord ID', value: `\`${i.user.id}\``, inline: true }, { name: '📛 ชื่อ IC', value: icName, inline: true }, { name: '⚙️ ชื่อในระบบ', value: `\`${result.nickname}\``, inline: false }, { name: '📞 เบอร์โทร IC', value: icPhone, inline: true }, { name: '🎂 อายุ OOC', value: `${oocAge} ปี`, inline: true }, { name: '🏷️ ตำแหน่ง', value: 'นักเรียนตำรวจ', inline: true }, { name: '📱 สถานะการเปลี่ยนชื่อดิส', value: nickChanged ? '✅ สำเร็จ' : '❌ ล้มเหลว', inline: true }).setTimestamp()] });
-                        await logCh.send(`- คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ\n\`\`\`${result.nickname}\`\`\``);
+                        await logCh.send({ content: `<@${i.user.id}>`, embeds: [new EmbedBuilder().setColor('#a0c400').setTitle('📝 มีการลงทะเบียนใหม่ผ่านระบบสำเร็จ').setDescription(`ผู้ใช้งาน <@${i.user.id}> ลงทะเบียนเข้าสู่ระบบสำเร็จแล้ว`).addFields({ name: '🆔 Discord ID', value: `\`${i.user.id}\``, inline: true }, { name: '📛 ชื่อ IC', value: icName, inline: true }, { name: '⚙️ ชื่อในระบบ (คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ)', value: `\`${result.nickname}\``, inline: false }, { name: '📞 เบอร์โทร IC', value: icPhone, inline: true }, { name: '🎂 อายุ OOC', value: `${oocAge} ปี`, inline: true }, { name: '🏷️ ตำแหน่ง', value: 'นักเรียนตำรวจ', inline: true }, { name: '📱 สถานะการเปลี่ยนชื่อดิส', value: nickChanged ? '✅ สำเร็จ' : '❌ ล้มเหลว', inline: true }).setTimestamp()] });
                     }
                 }
 

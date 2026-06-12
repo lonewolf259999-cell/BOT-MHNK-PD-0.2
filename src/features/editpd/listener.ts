@@ -29,10 +29,9 @@ export function setupEditPdFeature(client: Client): void {
                 const logCh = i.guild.channels.cache.get(logChId);
                 if (!logCh) return i.editReply({ content: '❌ ไม่พบ Log channel' });
                 const msgs = await logCh.messages.fetch({ limit: 100 });
-                let embedMsg: any = null, fivemMsg: any = null;
+                let embedMsg: any = null;
                 for (const msg of msgs.values()) {
                     if (msg.embeds.length > 0) { const f = msg.embeds[0].fields?.find((x: any) => x.name.includes('Discord ID')); if (f && f.value.replace(/`/g, '').trim() === uid) embedMsg = msg; }
-                    if (msg.author.bot && msg.content?.includes('คัดลอกไปวางที่ Fivem')) fivemMsg = msg;
                 }
                 if (!embedMsg) return i.editReply({ content: '❌ ไม่พบประวัติการลงทะเบียน' });
                 if (newName) {
@@ -45,12 +44,10 @@ export function setupEditPdFeature(client: Client): void {
                     }
                 }
                 let e = EmbedBuilder.from(embedMsg.embeds[0]);
-                let fivemName = '';
-                if (newName) { e = e.spliceFields(1, 1, { name: '📛 ชื่อ IC', value: newName, inline: true }); const info = await findMemberByDiscordId(uid).catch(() => null); if (info) { const full = `${info.codeNumber} [MHNK-PD] ${newName}`; fivemName = truncateNickname(full); e = e.spliceFields(2, 1, { name: '⚙️ ชื่อในระบบ', value: `\`${fivemName}\``, inline: false }); } }
+                if (newName) { e = e.spliceFields(1, 1, { name: '📛 ชื่อ IC', value: newName, inline: true }); const info = await findMemberByDiscordId(uid).catch(() => null); if (info) { const full = `${info.codeNumber} [MHNK-PD] ${newName}`; e = e.spliceFields(2, 1, { name: '⚙️ ชื่อในระบบ (คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ)', value: `\`${truncateNickname(full)}\``, inline: false }); } }
                 if (newPhone) { e = e.spliceFields(3, 1, { name: '📞 เบอร์โทร IC', value: newPhone, inline: true }); changed.push(`เบอร์โทร → **${newPhone}**`); }
                 if (newAge) { e = e.spliceFields(4, 1, { name: '🎂 อายุ OOC', value: `${newAge} ปี`, inline: true }); changed.push(`อายุ → **${newAge}**`); }
                 await embedMsg.edit({ embeds: [e] });
-                if (newName && fivemName) { const c = `- คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ\n\`\`\`${fivemName}\`\`\``; if (fivemMsg) await fivemMsg.edit(c); else await logCh.send(c); }
                 if (changed.length === 0) return i.editReply({ content: '⚠️ ไม่มีการเปลี่ยนแปลง' });
                 await i.editReply({ content: '✅ อัปเดตสำเร็จ!\n' + changed.join('\n') });
             } catch (e) { logger.error('แก้PD', `ผิดพลาด: ${e}`); await i.editReply({ content: '❌ เกิดข้อผิดพลาด' }); }
