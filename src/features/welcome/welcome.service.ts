@@ -16,7 +16,7 @@ export async function isAlreadyRegistered(userId: string): Promise<boolean> {
     return false;
 }
 
-export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; fullNickname: string; wasTruncated: boolean } | null> {
+export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
     const reg = configService.getRegistryConfig();
     if (!reg.spreadsheetId || !reg.sheetName) return null;
     if (await isAlreadyRegistered(userId)) { logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ`); return null; }
@@ -33,13 +33,13 @@ export async function registerMember(icName: string, userId: string): Promise<{ 
     if (targetRow === -1) { logger.warn('สมัคร', 'ไม่พบแถวว่างที่มีรหัส'); return null; }
 
     const fullNickname = makeFullName(codeNumber, icName);
+    const truncatedNick = truncateNickname(fullNickname);
     const today = new Date();
     const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:F${targetRow}`, [[fullNickname, `'<@${userId}>`, 'นักเรียนตำรวจ']]);
+    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:F${targetRow}`, [[truncatedNick, `'<@${userId}>`, 'นักเรียนตำรวจ']]);
     await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
-    const truncatedNick = truncateNickname(fullNickname);
     logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
-    return { nickname: truncatedNick, fullNickname, wasTruncated: fullNickname.length > 32 };
+    return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
 }
 
 export async function moveMemberToOut(userId: string): Promise<void> {
@@ -77,6 +77,7 @@ export async function findMemberByDiscordId(userId: string): Promise<{ row: numb
 export async function updateMemberName(row: number, newFullName: string): Promise<void> {
     const reg = configService.getRegistryConfig();
     if (!reg.spreadsheetId || !reg.sheetName) return;
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${row}`, [[newFullName]]);
-    logger.info('แก้ชื่อ', `อัปเดตแถว ${row} ชื่อเป็น ${newFullName}`);
+    const truncated = truncateNickname(newFullName);
+    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${row}`, [[truncated]]);
+    logger.info('แก้ชื่อ', `อัปเดตแถว ${row} ชื่อเป็น ${truncated}`);
 }

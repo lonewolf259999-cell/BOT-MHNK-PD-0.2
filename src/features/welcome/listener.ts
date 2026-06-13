@@ -71,7 +71,7 @@ export function setupWelcomeFeature(client: Client): void {
                     }
                 }
 
-                let msg = `✅ ลงทะเบียนเรียบร้อยแล้ว!\n📝 **ชื่อในชีต:** ${result.fullNickname}\n🔄 **ชื่อ Discord:** ${result.nickname}`;
+                let msg = `✅ ลงทะเบียนเรียบร้อยแล้ว!\n📝 **ชื่อในชีต:** ${result.nickname}\n🔄 **ชื่อ Discord:** ${result.nickname}`;
                 if (result.wasTruncated) msg += '\n⚠️ *(ชื่อ IC ของคุณยาวเกินไป Discord จึงย่อชื่อให้สั้นลง)*';
                 if (!nickChanged) msg += '\n⚠️ *(หมายเหตุ: บอทไม่มีสิทธิ์เปลี่ยนชื่อเล่นให้คุณ)*';
                 await i.editReply({ content: msg });
