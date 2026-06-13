@@ -1,4 +1,4 @@
-import { Client, Events, SlashCommandBuilder, MessageFlags } from 'discord.js';
+import { Client, Events, MessageFlags } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { manualRecount } from '../count/count.service';
 import { createPanelEmbed, buildPanelComponents } from './panel.service';
@@ -17,16 +17,6 @@ const PANEL_IDS = new Set([
 const MODAL_BUTTONS = ['btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_registry'];
 
 export function setupRecountFeature(client: Client): void {
-    client.once(Events.ClientReady, async () => {
-        try {
-            const existing = await client.application?.commands.fetch();
-            const old = existing?.find(c => c.name === 'recount');
-            const cmd = new SlashCommandBuilder().setName('recount').setDescription('⚙️ แผงควบคุมตั้งค่าและนับยอดเคส');
-            if (old) await client.application?.commands.edit(old.id, cmd);
-            else await client.application?.commands.create(cmd);
-        } catch (e) { logger.error('RECOUNT', `ลงทะเบียนล้มเหลว: ${e}`); }
-    });
-
     client.on(Events.InteractionCreate, async (i: any) => {
         // --- /recount command ---
         if (i.isChatInputCommand && i.commandName === 'recount') {

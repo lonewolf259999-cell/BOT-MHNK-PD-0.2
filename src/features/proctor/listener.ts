@@ -13,7 +13,7 @@ export async function forwardProctorMessage(message: any, client: Client): Promi
     if (!target || !target.isTextBased()) return false;
     const opt: any = { embeds: [embed] };
     if (message.content) opt.content = message.content;
-    await target.send(opt);
+    await (target as any).send(opt);
     try { await message.react('✅'); } catch {}
     logger.info('Proctor', `ส่งต่อ Proctor ข้อความ ${message.id}`);
     return true;

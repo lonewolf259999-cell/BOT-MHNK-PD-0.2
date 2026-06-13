@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
@@ -33,20 +34,6 @@ export const CACHE = {
     MEMBER_TTL: 60000,      // 1 minute for member cache
 };
 
-// ---- Discord ----
-export const INTENTS = [
-    'Guilds',
-    'GuildMessages',
-    'MessageContent',
-    'GuildMembers',
-] as const;
-
-export const PARTIALS = [
-    'Message',
-    'Channel',
-    'Reaction',
-] as const;
-
 // ---- Bot Config ----
 export const BOT = {
     MAX_RESTART_PER_DAY: 8,
@@ -57,6 +44,17 @@ export const BOT = {
 
 export function validate(): string[] {
     const errors: string[] = [];
-    if (!env.botToken) errors.push('BOT_TOKEN is missing');
+    if (!env.botToken) errors.push('❌ BOT_TOKEN is missing — กรุณาใส่ BOT_TOKEN ใน .env');
+    if (!env.clientId) errors.push('❌ CLIENT_ID is missing — กรุณาใส่ CLIENT_ID ใน .env');
+    if (!env.guildId) errors.push('❌ GUILD_ID is missing — กรุณาใส่ GUILD_ID ใน .env');
+
+    // เช็ค credentials.json
+    const credPath = path.join(__dirname, '../../credentials.json');
+    try {
+        if (!fs.existsSync(credPath)) errors.push(`❌ credentials.json not found at ${credPath}`);
+    } catch {
+        errors.push(`❌ ไม่สามารถตรวจสอบ credentials.json`);
+    }
+
     return errors;
 }

@@ -1,14 +1,10 @@
-import { Client, Events, SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
+import { Client, Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { findMemberByDiscordId, updateMemberName } from '../welcome/welcome.service';
 import { truncateNickname } from '../../services/member.service';
 import { logger } from '../../core/logger';
 
 export function setupEditPdFeature(client: Client): void {
-    client.once(Events.ClientReady, async () => {
-        try { await client.application?.commands.create(new SlashCommandBuilder().setName('editpd').setDescription('📝 แก้ไขโปรไฟล์ตำรวจ (ชื่อ IC, เบอร์โทร, อายุ)')); logger.info('แก้PD', 'ลงทะเบียน /editpd สำเร็จ'); } catch (e) { logger.error('แก้PD', `ลงทะเบียนล้มเหลว: ${e}`); }
-    });
-
     client.on(Events.InteractionCreate, async (i: any) => {
         if (i.isChatInputCommand && i.commandName === 'editpd') {
             return i.showModal(new ModalBuilder().setCustomId('modal_edit_pd').setTitle('📝 แก้ไขโปรไฟล์ตำรวจ')

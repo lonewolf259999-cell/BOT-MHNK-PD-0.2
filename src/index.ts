@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, Events } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Events, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import http from 'http';
 import https from 'https';
 import { env, BOT, validate } from './config';
@@ -7,6 +7,7 @@ import { logger } from './core/logger';
 
 const errors = validate();
 if (errors.length > 0) {
+    // eslint-disable-next-line no-console
     console.error('❌ การตรวจสอบ Config ล้มเหลว:', errors.join(', '));
     process.exit(1);
 }
@@ -59,15 +60,42 @@ const client = new Client({
 
 client.on('error', (err) => logger.error('CLIENT', `Discord error: ${err.message}`));
 client.on('warn', (info) => logger.warn('CLIENT', `Discord คำเตือน: ${info}`));
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
     heartbeat();
     logger.info('CLIENT', `${client.user?.tag} ออนไลน์พร้อมทำงาน!`);
+
+    // ✅ ลงทะเบียน Slash Commands ทั้งหมดที่เดียว
+    const commandDefs = [
+        { name: '30day', description: '⏳ ตรวจสอบและจัดการสมาชิกครบ 30 วัน', permissions: 0 },
+        { name: 'editpd', description: '📝 แก้ไขโปรไฟล์ตำรวจ (ชื่อ IC, เบอร์โทร, อายุ)' },
+        { name: 'recount', description: '⚙️ แผงควบคุมตั้งค่าและนับยอดเคส' },
+        { name: 'de', description: 'ลบข้อความล่าสุดในแชนแนลนี้ (สูงสุด 500)', permissions: PermissionFlagsBits.ManageMessages },
+    ];
+
+    for (const def of commandDefs) {
+        try {
+            const cmd = new SlashCommandBuilder().setName(def.name).setDescription(def.description);
+            if (def.name === 'de') {
+                cmd.addIntegerOption(opt => opt.setName('amount').setDescription('จำนวนข้อความที่ต้องการลบ (1-500)').setRequired(true).setMinValue(1).setMaxValue(500));
+            }
+            if (def.permissions !== undefined) cmd.setDefaultMemberPermissions(def.permissions);
+
+            const existing = await client.application?.commands.fetch();
+            const old = existing?.find(c => c.name === def.name);
+            if (old) await client.application?.commands.edit(old.id, cmd);
+            else await client.application?.commands.create(cmd);
+
+            logger.info('COMMAND', `ลงทะเบียน /${def.name} สำเร็จ`);
+        } catch (err) {
+            logger.error('COMMAND', `ลงทะเบียน /${def.name} ล้มเหลว: ${err}`);
+        }
+    }
 });
 
 async function start(): Promise<void> {
     try {
         await configService.load();
-    } catch (error) {
+    } catch {
         logger.error('STARTUP', 'โหลด config ไม่สำเร็จ — บอทอาจทำงานไม่ครบ');
     }
 
@@ -107,7 +135,7 @@ async function start(): Promise<void> {
     await client.login(env.botToken);
 }
 
-start().catch((error) => {
-    logger.error('STARTUP', `เริ่มบอทไม่สำเร็จ: ${error.message}`);
+start().catch((err) => {
+    logger.error('STARTUP', `เริ่มบอทไม่สำเร็จ: ${err.message}`);
     process.exit(1);
 });

@@ -5,7 +5,6 @@ import { logger } from '../../core/logger';
 
 interface LogtimeInfo { name: string; date: string; time: string; id?: string; duration?: string; }
 const NEW_ROW_MIN = 3;
-const COL = { FIND_NAME: 'D', OUT_DATE: 'J', OUT_TIME: 'K', STEAM: 'M', NEW_NAME: 'X', NEW_STEAM: 'Y' };
 
 function icNameFromD(cell: string): string {
     if (!cell) return '';

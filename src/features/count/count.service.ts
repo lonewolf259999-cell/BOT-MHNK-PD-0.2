@@ -31,7 +31,7 @@ export async function manualRecount(client: any, interaction: any): Promise<void
     }
     try { await interaction.deferReply({ flags: 64 }).catch(() => {}); } catch { return; }
     await sheetService.clearValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!C4:G`);
-    let rows = await sheetService.getValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A:G`, 0) || [];
+    const rows = await sheetService.getValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A:G`, 0) || [];
     for (let i = 3; i < rows.length; i++) { if (rows[i]) for (let c = 2; c <= 6; c++) if (rows[i].length > c) rows[i][c] = ''; }
 
     const channels = [{ id: cfg.CHANNELS.CHANNEL_1, col: 2 }, { id: cfg.CHANNELS.CHANNEL_2, col: 3 }, { id: cfg.CHANNELS.CHANNEL_3, col: 4 }, { id: cfg.CHANNELS.CHANNEL_4, col: 5 }, { id: cfg.CHANNELS.CHANNEL_5, col: 6 }];
@@ -53,7 +53,7 @@ export async function manualRecount(client: any, interaction: any): Promise<void
                     }
                     const p = cache.get(uid); if (!p) continue;
                     const sn = normalizeName(p.nickname), du = normalizeName(p.username);
-                    let ri = rows.findIndex((r: string[], idx: number) => idx >= 3 && r[0] && (normalizeName(r[0]).includes(sn) || normalizeName(r[0]).includes(du) || normalizeName(r[1] || '') === du));
+                    const ri = rows.findIndex((r: string[], idx: number) => idx >= 3 && r[0] && (normalizeName(r[0]).includes(sn) || normalizeName(r[0]).includes(du) || normalizeName(r[1] || '') === du));
                     if (ri !== -1) { const v = parseInt(rows[ri][ch.col] || '0') || 0; rows[ri][ch.col] = (v + 1).toString(); }
                     else { const nr = [p.nickname, p.username, '', '', '', '', '']; nr[ch.col] = '1'; rows.push(nr); }
                 }

@@ -57,9 +57,9 @@ export async function moveMemberToOut(userId: string): Promise<void> {
     const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!B:B`, 0);
     let nextRow = outRows.length + 1; if (nextRow < 3) nextRow = 3;
     await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!B${nextRow}:M${nextRow}`, [memberData]);
-    for (const col of ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U']) {
-        await sheetService.clearValues(reg.spreadsheetId, `${reg.sheetName}!${col}${foundRow}`).catch(() => {});
-    }
+    // Batch clear — 1 API call instead of 16
+    const clearCols = ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
+    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${foundRow}:U${foundRow}`, [new Array(clearCols.length).fill('')]).catch(() => {});
     logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow}`);
 }
 

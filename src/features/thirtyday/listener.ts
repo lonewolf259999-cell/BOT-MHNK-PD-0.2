@@ -1,4 +1,4 @@
-import { Client, Events, SlashCommandBuilder, MessageFlags } from 'discord.js';
+import { Client, Events, MessageFlags } from 'discord.js';
 import { sheetService } from '../../core/sheet.service';
 import { configService } from '../../core/config.service';
 import { extractUserId, colToIndex, sleep } from '../../services/utils';
@@ -15,15 +15,11 @@ async function moveToOutDC(sid: string, sn: string, osn: string, namePdRowIndex:
     const md = new Array(12).fill(''); for (let c = 0; c < 12; c++) { const si = c + 1; if (row[si] !== undefined) md[c] = String(row[si]).trim(); }
     await sheetService.updateValues(sid, `${osn}!B${nr}:M${nr}`, [md]);
     await sheetService.updateValues(sid, `${osn}!${CONFIG.REASON_COLUMN}${nr}`, [[reason]]);
-    // ลบข้อมูลใน NamePD แถวที่ถูกต้อง (namePdRowIndex = idx + 1)
-    for (const col of ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U']) await sheetService.clearValues(sid, `${sn}!${col}${namePdRowIndex}`).catch(() => {});
+    // Batch clear — 1 API call instead of 16
+    await sheetService.updateValues(sid, `${sn}!B${namePdRowIndex}:U${namePdRowIndex}`, [new Array(16).fill('')]).catch(() => {});
 }
 
 export function setupThirtyDayFeature(client: Client): void {
-    client.once(Events.ClientReady, async () => {
-        try { await client.application?.commands.create(new SlashCommandBuilder().setName('30day').setDescription('⏳ ตรวจสอบและจัดการสมาชิกครบ 30 วัน').setDefaultMemberPermissions(0)); logger.info('30วัน', 'ลงทะเบียน /30day สำเร็จ'); } catch (e) { logger.error('30วัน', `ลงทะเบียนล้มเหลว: ${e}`); }
-    });
-
     client.on(Events.InteractionCreate, async (i: any) => {
         if (!i.isChatInputCommand || i.commandName !== '30day') return;
         if (!i.memberPermissions?.has('Administrator')) return i.reply({ content: '❌ เฉพาะผู้ดูแลระบบ', flags: MessageFlags.Ephemeral });

@@ -130,7 +130,7 @@ export class SheetService {
         this.invalidateCache(spreadsheetId);
     }
 
-    private invalidateCache(spreadsheetId: string): void {
+    private invalidateCache(_spreadsheetId: string): void {
         cache.clear();
     }
 }

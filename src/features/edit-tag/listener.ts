@@ -27,13 +27,13 @@ export function setupEditTagFeature(client: Client): void {
             }
 
             if (i.isButton && i.customId?.startsWith('editag_add_')) {
-                return i.showModal(new ModalBuilder().setCustomId(`editag_modal_${i.customId.split('_')[2]}_${i.customId.split('_')[3]}`).setTitle('➕ เพิ่มคนในคดี').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('input_codes').setLabel('รหัสตำรวจ (คั่นด้วย , หรือ enter)').setStyle(TextInputStyle.Paragraph).setPlaceholder('001, 005, 010').setRequired(true).setMaxLength(200)))).catch(() => {});
+                return i.showModal(new ModalBuilder().setCustomId(`editag_modal_${i.customId.split('_')[2]}_${i.customId.split('_')[3]}`).setTitle('➕ เพิ่มคนในคดี').addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('input_codes').setLabel('รหัสตำรวจ (คั่นด้วย , หรือ enter)').setStyle(TextInputStyle.Paragraph).setPlaceholder('001, 005, 010').setRequired(true).setMaxLength(200)))).catch(() => {});
             }
 
             if (i.isModalSubmit && i.customId?.startsWith('editag_modal_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await ch.messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
+                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
                 const codes = i.fields.getTextInputValue('input_codes').trim().split(/[\s,]+/).filter(Boolean);
                 if (!codes.length) return i.editReply({ content: '❌ ไม่พบรหัส', components: [] });
                 const { found, notFound } = findMembersByCode(i.guild, codes);
@@ -46,8 +46,8 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isStringSelectMenu && i.customId?.startsWith('editag_addsel_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await ch.messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
+                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
                 let c = msg.content, added = 0;
                 for (const id of i.values) { if (!c.includes(`<@${id}>`) && !c.includes(`<@!${id}>`)) { c += ` <@${id}>`; added++; } }
                 await msg.edit(c); await i.editReply({ content: `✅ เพิ่ม ${added} คนสำเร็จ`, components: [] }); setTimeout(() => i.deleteReply().catch(() => {}), 3000); return;
@@ -55,9 +55,9 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isButton && i.customId?.startsWith('editag_rem_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await ch.messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
-                const ids = [...new Set((msg.content.match(/<@!?(\d+)>/g) || []).map((m: string) => m.match(/\d+/)?.[0]))].slice(1);
+                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
+                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const ids: string[] = [...new Set((msg.content.match(/<@!?(\d+)>/g) || []).map((m: string) => m.match(/\d+/)?.[0]))].filter(Boolean) as string[];
                 const opts: { label: string; value: string }[] = [];
                 for (const id of ids) { const m = await i.guild.members.fetch(id).catch(() => null); opts.push({ label: m ? m.displayName : id, value: id }); }
                 if (!opts.length) return i.editReply({ content: '❌ ไม่มีคนอื่นให้ลบแล้ว', components: [] });
@@ -68,8 +68,8 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isStringSelectMenu && i.customId?.startsWith('editag_remove_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await ch.messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
+                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
                 let c = msg.content; for (const id of i.values) c = c.replace(new RegExp(`<@!?${id}>`, 'g'), '');
                 c = c.replace(/\s+/g, ' ').trim(); await msg.edit(c);
                 await i.editReply({ content: `✅ ลบ ${i.values.length} คนสำเร็จ`, components: [] }); setTimeout(() => i.deleteReply().catch(() => {}), 3000);

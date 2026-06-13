@@ -7,12 +7,32 @@ export function normalizeName(str: string): string {
 /**
  * Reply ephemeral then auto-delete after delay ms (default 5000).
  * Same pattern as v0.1's ephemeral auto-delete.
+ * Returns the timeout handle so callers can clear it if needed.
  */
-export async function replyAndDelete(interaction: any, content: string, delay = 5000): Promise<void> {
+const replyTimeouts = new Map<string, NodeJS.Timeout>();
+
+export async function replyAndDelete(interaction: any, content: string, delay = 5000): Promise<NodeJS.Timeout | null> {
     try {
         await interaction.editReply({ content });
-        setTimeout(() => interaction.deleteReply().catch(() => {}), delay);
-    } catch {}
+        const key = interaction.id || `${Date.now()}_${Math.random()}`;
+        // Clear previous timeout for this interaction if any
+        const prev = replyTimeouts.get(key);
+        if (prev) clearTimeout(prev);
+        const timeout = setTimeout(() => {
+            interaction.deleteReply().catch(() => {});
+            replyTimeouts.delete(key);
+        }, delay);
+        replyTimeouts.set(key, timeout);
+        return timeout;
+    } catch { return null; }
+}
+
+/**
+ * Clean up all pending reply timeouts (e.g. on bot shutdown).
+ */
+export function clearAllReplyTimeouts(): void {
+    for (const [, timeout] of replyTimeouts) clearTimeout(timeout);
+    replyTimeouts.clear();
 }
 
 export function sleep(ms: number): Promise<void> {
