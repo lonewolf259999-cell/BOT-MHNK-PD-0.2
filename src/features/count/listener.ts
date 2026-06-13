@@ -1,4 +1,5 @@
 import { Client, Events } from 'discord.js';
+import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { processCountBatch } from './count.service';
 import { logger } from '../../core/logger';
@@ -32,7 +33,7 @@ export function setupCountFeature(client: Client): void {
             if (!message.guild || !allowed.includes(message.channel.id)) return;
             const tags = getTagsFromMessage(message.content, message.guild);
             if (tags.length === 0) return;
-            await message.react('✅').catch(() => {});
+            await message.react('✅').catch(silentCatch('Count'));
             if (messageLog.has(message.id)) return;
             messageLog.set(message.id, tags);
             await processCountBatch(tags, message.channel.id, false);

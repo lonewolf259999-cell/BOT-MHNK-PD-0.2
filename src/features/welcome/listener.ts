@@ -1,4 +1,5 @@
 import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } from 'discord.js';
+import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { isAlreadyRegistered, registerMember, moveMemberToOut } from './welcome.service';
 import { logger } from '../../core/logger';
@@ -44,7 +45,7 @@ export function setupWelcomeFeature(client: Client): void {
                     .addComponents(new ActionRowBuilder<any>().addComponents(new TextInputBuilder().setCustomId('input_ic_name').setLabel('ชื่อ IC ตามบัตรประชาชนในประเทศ').setStyle(TextInputStyle.Short).setPlaceholder('กรุณากรอกชื่อในเกมของคุณเป็นภาษาอังกฤษ').setRequired(true)))
                     .addComponents(new ActionRowBuilder<any>().addComponents(new TextInputBuilder().setCustomId('input_ic_phone').setLabel('เบอร์โทร IC').setStyle(TextInputStyle.Short).setPlaceholder('กรุณากรอกเบอร์โทรศัพท์ในเกม').setRequired(true)))
                     .addComponents(new ActionRowBuilder<any>().addComponents(new TextInputBuilder().setCustomId('input_ooc_age').setLabel('อายุ OOC (ชีวิตจริง)').setStyle(TextInputStyle.Short).setPlaceholder('กรุณากรอกอายุจริงของคุณ').setRequired(true)));
-                return await i.showModal(modal).catch(() => {});
+                return await i.showModal(modal).catch(silentCatch('Welcome'));
             }
 
             if (i.isModalSubmit && i.customId === 'modal_register') {

@@ -1,4 +1,5 @@
 import { sheetService } from '../../core/sheet.service';
+import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { truncateNickname, makeFullName } from '../../services/member.service';
 import { logger } from '../../core/logger';
@@ -59,7 +60,7 @@ export async function moveMemberToOut(userId: string): Promise<void> {
     await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!B${nextRow}:M${nextRow}`, [memberData]);
     // Batch clear — 1 API call instead of 16
     const clearCols = ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${foundRow}:U${foundRow}`, [new Array(clearCols.length).fill('')]).catch(() => {});
+    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${foundRow}:U${foundRow}`, [new Array(clearCols.length).fill('')]).catch(silentCatch('Welcome'));
     logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow}`);
 }
 

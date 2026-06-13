@@ -1,7 +1,7 @@
 import { Client, Events, MessageFlags } from 'discord.js';
 import { sheetService } from '../../core/sheet.service';
 import { configService } from '../../core/config.service';
-import { extractUserId, colToIndex, sleep } from '../../services/utils';
+import { extractUserId, colToIndex, sleep, silentCatch } from '../../services/utils';
 import { stripPrefix } from '../../services/member.service';
 import { logger } from '../../core/logger';
 
@@ -16,7 +16,7 @@ async function moveToOutDC(sid: string, sn: string, osn: string, namePdRowIndex:
     await sheetService.updateValues(sid, `${osn}!B${nr}:M${nr}`, [md]);
     await sheetService.updateValues(sid, `${osn}!${CONFIG.REASON_COLUMN}${nr}`, [[reason]]);
     // Batch clear — 1 API call instead of 16
-    await sheetService.updateValues(sid, `${sn}!B${namePdRowIndex}:U${namePdRowIndex}`, [new Array(16).fill('')]).catch(() => {});
+    await sheetService.updateValues(sid, `${sn}!B${namePdRowIndex}:U${namePdRowIndex}`, [new Array(16).fill('')]).catch(silentCatch('30Day'));
 }
 
 export function setupThirtyDayFeature(client: Client): void {
@@ -39,10 +39,10 @@ export function setupThirtyDayFeature(client: Client): void {
                 if (CONFIG.EXEMPT_ROLES.some((r: string) => mem.roles.cache.has(r))) { skip.push(`${mem.user.tag}: มี EXEMPT`); continue; }
                 await moveToOutDC(reg.spreadsheetId, reg.sheetName, reg.outSheetName, idx + 1, row, '30Day');
                 const toRemove = mem.roles.cache.filter((r: any) => r.id !== mem.guild.id && !CONFIG.EXEMPT_ROLES.includes(r.id) && r.id !== CONFIG.THIRTY_DAY_ROLE_ID);
-                if (toRemove.size > 0) await mem.roles.remove(toRemove).catch(() => {});
-                await mem.roles.add(CONFIG.THIRTY_DAY_ROLE_ID).catch(() => {});
+                if (toRemove.size > 0) await mem.roles.remove(toRemove).catch(silentCatch('30Day'));
+                await mem.roles.add(CONFIG.THIRTY_DAY_ROLE_ID).catch(silentCatch('30Day'));
                 const cn = stripPrefix(mem.nickname || mem.displayName);
-                if (cn && cn !== mem.nickname) await mem.setNickname(cn).catch(() => {});
+                if (cn && cn !== mem.nickname) await mem.setNickname(cn).catch(silentCatch('30Day'));
                 done.push(`${mem.user.tag}: จัดการสำเร็จ`); await sleep(500);
             }
             await i.editReply({ content: `⏳ **ผลการตรวจสอบครบ 30 วัน**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ **จัดการแล้ว ${done.length} คน:**\n${done.map(p => `  • ${p}`).join('\n')}\n\n⏭️ **ข้าม ${skip.length} คน:**\n${skip.map(s => `  • ${s}`).join('\n')}` });

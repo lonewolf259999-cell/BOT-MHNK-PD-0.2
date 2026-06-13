@@ -2,7 +2,7 @@ import { Client, Events, MessageFlags } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { manualRecount } from '../count/count.service';
 import { createPanelEmbed, buildPanelComponents } from './panel.service';
-import { replyAndDelete } from '../../services/utils';
+import { replyAndDelete, silentCatch } from '../../services/utils';
 import { buildCountModal, buildWelcomeModal, buildBypdModal, buildRegistryModal } from './modals';
 import { logger } from '../../core/logger';
 import { resendStates } from './resend.state';
@@ -40,7 +40,7 @@ export function setupRecountFeature(client: Client): void {
                     'btn_cfg_bypd': buildBypdModal(),
                     'btn_cfg_registry': buildRegistryModal(),
                 };
-                return i.showModal(modals[i.customId]).catch(() => {});
+                return i.showModal(modals[i.customId]).catch(silentCatch('Recount'));
             }
 
             // ⭐ เริ่มนับข้อความเก่า → manualRecount จะ defer เองภายใน (เหมือน v0.1)
@@ -141,7 +141,7 @@ async function runResendMissed(client: Client, i: any, abortSignal: AbortSignal)
             const hasCheck = msg.reactions.cache.some((r: any) => r.emoji.name === '✅');
             if (isBypd && !hasCheck) { try { await processBypd(msg); bypdSent++; } catch { failed++; } await new Promise(r => setTimeout(r, 500)); } else if (isBypd && hasCheck) bypdAlready++;
             if (isProctor && !hasCheck) {
-                try { const targetId = configService.getProctorChannelId(); if (targetId) { const target = guild.channels.cache.get(targetId); if (target?.isTextBased()) { await target.send({ embeds: [msg.embeds[0]] }); await msg.react('✅').catch(() => {}); proctorSent++; } } } catch { failed++; }
+                try { const targetId = configService.getProctorChannelId(); if (targetId) { const target = guild.channels.cache.get(targetId); if (target?.isTextBased()) { await target.send({ embeds: [msg.embeds[0]] }); await msg.react('✅').catch(silentCatch('Recount')); proctorSent++; } } } catch { failed++; }
                 await new Promise(r => setTimeout(r, 500));
             } else if (isProctor && hasCheck) proctorAlready++;
         }

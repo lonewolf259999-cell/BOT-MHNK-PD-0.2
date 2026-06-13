@@ -3,6 +3,7 @@ import { configService } from '../../core/config.service';
 import { findMemberByDiscordId, updateMemberName } from '../welcome/welcome.service';
 import { truncateNickname } from '../../services/member.service';
 import { logger } from '../../core/logger';
+import { silentCatch } from '../../services/utils';
 
 export function setupEditPdFeature(client: Client): void {
     client.on(Events.InteractionCreate, async (i: any) => {
@@ -11,7 +12,7 @@ export function setupEditPdFeature(client: Client): void {
                 .addComponents(new ActionRowBuilder<any>().addComponents(new TextInputBuilder().setCustomId('input_ic_name').setLabel('ชื่อ IC ใหม่').setStyle(TextInputStyle.Short).setPlaceholder('กรุณากรอกชื่อ IC ใหม่ (ถ้าไม่เปลี่ยนปล่อยว่าง)').setRequired(false).setMaxLength(100)))
                 .addComponents(new ActionRowBuilder<any>().addComponents(new TextInputBuilder().setCustomId('input_ic_phone').setLabel('เบอร์โทร IC ใหม่').setStyle(TextInputStyle.Short).setPlaceholder('กรุณากรอกเบอร์โทรใหม่ (ถ้าไม่เปลี่ยนปล่อยว่าง)').setRequired(false).setMaxLength(20)))
                 .addComponents(new ActionRowBuilder<any>().addComponents(new TextInputBuilder().setCustomId('input_ooc_age').setLabel('อายุ OOC ใหม่').setStyle(TextInputStyle.Short).setPlaceholder('กรุณากรอกอายุใหม่ (ถ้าไม่เปลี่ยนปล่อยว่าง)').setRequired(false).setMaxLength(3)))
-            ).catch(() => {});
+            ).catch(silentCatch('EditPD'));
         }
         if (i.isModalSubmit && i.customId === 'modal_edit_pd') {
             await i.deferReply({ flags: MessageFlags.Ephemeral });

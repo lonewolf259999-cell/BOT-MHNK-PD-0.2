@@ -1,7 +1,18 @@
 /** Shared utility functions */
+import { logger } from '../core/logger';
 
 export function normalizeName(str: string): string {
     return (str || '').trim().toLowerCase();
+}
+
+/**
+ * Silent catch wrapper — logs the error instead of swallowing it silently.
+ * Usage: await somePromise.catch(silentCatch('FeatureName'))
+ */
+export function silentCatch(context: string) {
+    return (err: any) => {
+        logger.warn(context, `⚠️ Suppressed error: ${err?.message || err}`);
+    };
 }
 
 /**
@@ -19,7 +30,7 @@ export async function replyAndDelete(interaction: any, content: string, delay = 
         const prev = replyTimeouts.get(key);
         if (prev) clearTimeout(prev);
         const timeout = setTimeout(() => {
-            interaction.deleteReply().catch(() => {});
+            interaction.deleteReply().catch(silentCatch('replyAndDelete'));
             replyTimeouts.delete(key);
         }, delay);
         replyTimeouts.set(key, timeout);
