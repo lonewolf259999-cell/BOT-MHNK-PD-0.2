@@ -11,7 +11,15 @@ export function setupLogtimeFeature(client: Client): void {
             const text = buildMessageText(message);
             const info = extractInfo(text);
             if (!info.name || !info.date) return;
-            await processLogtime({ name: info.name, date: info.date, time: info.time || '', id: info.id || undefined });
+            await processLogtime({
+                name: info.name,
+                date: info.date,
+                time: info.time || '',
+                id: info.id || undefined,
+                inDate: info.inDate || undefined,
+                inTime: info.inTime || undefined,
+                duration: info.duration || undefined,
+            });
         } catch (e) { logger.error('ลงเวลา', `ผิดพลาด: ${e}`); }
     });
 }
@@ -25,6 +33,16 @@ function buildMessageText(msg: any): string {
 function extractInfo(text: string) {
     const c = text.replace(/`/g, '').replace(/\*/g, '').replace(/\u200B/g, '');
     const name = (c.match(/รายงานเข้าเวรของ\s*[-–—]\s*(.+)/i) || [])[1]?.trim() || null;
-    const out = c.match(/เวลาออกงาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i);
-    return { name, date: out?.[1] || null, time: out?.[2] || null, id: (c.match(/(steam:\w+)/i) || [])[1] || null };
+    const inMatch = c.match(/เวลาเข้างาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i);
+    const outMatch = c.match(/เวลาออกงาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i);
+    const duration = (c.match(/ระยะเวลาที่เข้าเวร\s*\n?\s*(\d{2}:\d{2}:\d{2})/i) || [])[1] || null;
+    return {
+        name,
+        inDate: inMatch ? inMatch[1] : null,
+        inTime: inMatch ? inMatch[2] : null,
+        date: outMatch?.[1] || null,
+        time: outMatch?.[2] || null,
+        duration,
+        id: (c.match(/(steam:\w+)/i) || [])[1] || null,
+    };
 }
