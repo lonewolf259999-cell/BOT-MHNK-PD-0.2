@@ -4,6 +4,17 @@ import { configService } from '../../core/config.service';
 import { truncateNickname, makeFullName } from '../../services/member.service';
 import { logger } from '../../core/logger';
 
+// 🔥 Queue System ป้องกัน race condition — ทำให้ registerMember ทำงานทีละคน
+let registrationQueue: Promise<any> = Promise.resolve();
+
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+    registrationQueue = registrationQueue.then(task, task).catch((e) => {
+        logger.error('สมัคร', `Queue error: ${e}`);
+        return undefined;
+    });
+    return registrationQueue as Promise<T>;
+}
+
 export async function isAlreadyRegistered(userId: string): Promise<boolean> {
     const reg = configService.getRegistryConfig();
     if (!reg.spreadsheetId || !reg.sheetName) return false;
@@ -17,29 +28,70 @@ export async function isAlreadyRegistered(userId: string): Promise<boolean> {
 }
 
 export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
-    const reg = configService.getRegistryConfig();
-    if (!reg.spreadsheetId || !reg.sheetName) return null;
-    if (await isAlreadyRegistered(userId)) { logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ`); return null; }
-
-    const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:D`, 0);
-    let targetRow = -1, codeNumber = '';
-    for (let i = 2; i < rows.length; i++) {
-        if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) { targetRow = i + 1; codeNumber = rows[i][0].trim(); break; }
+    // เช็คคร่าวๆ ก่อนเข้า queue (กันคนที่ลงทะเบียนแล้ว)
+    if (await isAlreadyRegistered(userId)) {
+        logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ (pre-check)`);
+        return null;
     }
-    if (targetRow === -1) {
-        const dyn = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C${rows.length + 1}:C${rows.length + 20}`, 0);
-        for (let j = 0; j < dyn.length; j++) { if (dyn[j][0]) { targetRow = rows.length + j + 1; codeNumber = dyn[j][0].trim(); break; } }
-    }
-    if (targetRow === -1) { logger.warn('สมัคร', 'ไม่พบแถวว่างที่มีรหัส'); return null; }
+    // เข้า queue — จะทำงานทีละคน ป้องกัน race condition
+    return enqueue(() => _executeRegister(icName, userId));
+}
 
-    const fullNickname = makeFullName(codeNumber, icName);
-    const truncatedNick = truncateNickname(fullNickname);
-    const today = new Date();
-    const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:F${targetRow}`, [[truncatedNick, `'<@${userId}>`, 'นักเรียนตำรวจ']]);
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
-    logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
-    return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
+async function _executeRegister(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
+    try {
+        const reg = configService.getRegistryConfig();
+        if (!reg.spreadsheetId || !reg.sheetName) return null;
+
+        // ✅ Double-check: เช็คซ้ำอีกครั้งเมื่อถึงคิวจริง (กันคนที่กดติดๆ กัน)
+        const already = await isAlreadyRegistered(userId);
+        if (already) {
+            logger.warn('สมัคร', `ผู้ใช้ ${userId} สมัครซ้ำ (ตรวจพบใน Queue) — ข้าม`);
+            return null;
+        }
+
+        const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:D`, 0);
+        let targetRow = -1, codeNumber = '';
+
+        // หาแถวว่าง: C มีค่า, D ว่าง
+        for (let i = 2; i < rows.length; i++) {
+            if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) {
+                targetRow = i + 1;
+                codeNumber = rows[i][0].trim();
+                break;
+            }
+        }
+
+        // ถ้าไม่เจอใน range ที่อ่านมา → ลองขยายออกไปอีก 20 แถว
+        if (targetRow === -1) {
+            const dyn = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C${rows.length + 1}:C${rows.length + 20}`, 0);
+            for (let j = 0; j < dyn.length; j++) {
+                if (dyn[j][0]) {
+                    targetRow = rows.length + j + 1;
+                    codeNumber = dyn[j][0].trim();
+                    break;
+                }
+            }
+        }
+
+        if (targetRow === -1) {
+            logger.warn('สมัคร', 'ไม่พบแถวว่างที่มีรหัส');
+            return null;
+        }
+
+        const fullNickname = makeFullName(codeNumber, icName);
+        const truncatedNick = truncateNickname(fullNickname);
+        const today = new Date();
+        const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+
+        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:F${targetRow}`, [[truncatedNick, `'<@${userId}>`, 'นักเรียนตำรวจ']]);
+        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
+        logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
+        return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
+
+    } catch (error) {
+        logger.error('สมัคร', `เกิดข้อผิดพลาด: ${error}`);
+        return null;
+    }
 }
 
 export async function moveMemberToOut(userId: string): Promise<void> {
