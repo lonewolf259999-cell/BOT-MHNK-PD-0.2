@@ -135,11 +135,17 @@ async function runResendMissed(client: Client, i: any, abortSignal: AbortSignal)
         if (messages.size === 0) break;
         const batch = [...messages.values()].reverse();
         for (const msg of batch) {
-            const content = msg.content || msg.embeds?.[0]?.description || '';
-            const isBypd = content.toUpperCase().includes('BYPD');
+            // ตรวจ BYPD แบบละเอียด (content + ทุก embed)
+            const hasBypd = (msg.content?.toUpperCase().includes('BYPD')) ||
+                msg.embeds?.some((e: any) =>
+                    e.title?.toUpperCase().includes('BYPD') ||
+                    e.description?.toUpperCase().includes('BYPD') ||
+                    e.fields?.some((f: any) => f.name?.toUpperCase().includes('BYPD') || f.value?.toUpperCase().includes('BYPD')) ||
+                    e.footer?.text?.toUpperCase().includes('BYPD')
+                );
             const isProctor = msg.embeds?.[0]?.title?.includes('📋 บันทึกการคุมสอบ Proctor') ?? false;
             const hasCheck = msg.reactions.cache.some((r: any) => r.emoji.name === '✅');
-            if (isBypd && !hasCheck) { try { await processBypd(msg); bypdSent++; } catch { failed++; } await new Promise(r => setTimeout(r, 500)); } else if (isBypd && hasCheck) bypdAlready++;
+            if (hasBypd && !hasCheck) { try { await processBypd(msg); bypdSent++; } catch { failed++; } await new Promise(r => setTimeout(r, 500)); } else if (hasBypd && hasCheck) bypdAlready++;
             if (isProctor && !hasCheck) {
                 try { const targetId = configService.getProctorChannelId(); if (targetId) { const target = guild.channels.cache.get(targetId); if (target?.isTextBased()) { await target.send({ embeds: [msg.embeds[0]] }); await msg.react('✅').catch(silentCatch('Recount')); proctorSent++; } } } catch { failed++; }
                 await new Promise(r => setTimeout(r, 500));
