@@ -7,6 +7,7 @@ import { buildCountModal, buildWelcomeModal, buildBypdModal, buildRegistryModal 
 import { logger } from '../../core/logger';
 import { resendStates } from './resend.state';
 import { processBypd } from '../bypd/bypd.service';
+import { hasBypdInMessage } from '../bypd/bypd.utils';
 
 const PANEL_IDS = new Set([
     'btn_recount_manual', 'btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_registry',
@@ -135,14 +136,7 @@ async function runResendMissed(client: Client, i: any, abortSignal: AbortSignal)
         if (messages.size === 0) break;
         const batch = [...messages.values()].reverse();
         for (const msg of batch) {
-            // ตรวจ BYPD แบบละเอียด (content + ทุก embed)
-            const hasBypd = (msg.content?.toUpperCase().includes('BYPD')) ||
-                msg.embeds?.some((e: any) =>
-                    e.title?.toUpperCase().includes('BYPD') ||
-                    e.description?.toUpperCase().includes('BYPD') ||
-                    e.fields?.some((f: any) => f.name?.toUpperCase().includes('BYPD') || f.value?.toUpperCase().includes('BYPD')) ||
-                    e.footer?.text?.toUpperCase().includes('BYPD')
-                );
+            const hasBypd = hasBypdInMessage(msg);
             const isProctor = msg.embeds?.[0]?.title?.includes('📋 บันทึกการคุมสอบ Proctor') ?? false;
             const hasCheck = msg.reactions.cache.some((r: any) => r.emoji.name === '✅');
             if (hasBypd && !hasCheck) { try { await processBypd(msg); bypdSent++; } catch { failed++; } await new Promise(r => setTimeout(r, 500)); } else if (hasBypd && hasCheck) bypdAlready++;

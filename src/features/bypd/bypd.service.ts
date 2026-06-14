@@ -2,6 +2,7 @@ import { EmbedBuilder, Message } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { sleep } from '../../services/utils';
+import { hasBypdInEmbed } from './bypd.utils';
 
 /** กัน process message ซ้ำ (message.id เดียว) */
 const processedMessages = new Set<string>();
@@ -110,15 +111,6 @@ async function sendBypdReport(ch: any, guild: any, content: string): Promise<voi
             .setTimestamp()
         ]
     });
-}
-
-/** ตรวจสอบว่า embed มีคำว่า BYPD หรือไม่ */
-function hasBypdInEmbed(embed: any): boolean {
-    if (embed.title?.toUpperCase().includes('BYPD')) return true;
-    if (embed.description?.toUpperCase().includes('BYPD')) return true;
-    if (embed.fields?.some((f: any) => f.name?.toUpperCase().includes('BYPD') || f.value?.toUpperCase().includes('BYPD'))) return true;
-    if (embed.footer?.text?.toUpperCase().includes('BYPD')) return true;
-    return false;
 }
 
 export async function processBypd(message: Message): Promise<boolean> {
