@@ -2,6 +2,7 @@ import { sheetService } from '../../core/sheet.service';
 import { configService } from '../../core/config.service';
 import { normalizeName } from '../../services/utils';
 import { logger } from '../../core/logger';
+import { locks } from '../../core/lock.service';
 
 interface LogtimeInfo {
     name: string;
@@ -158,44 +159,44 @@ function getAccumulatedMinutes(rows: string[][], col: string, row: number): numb
 }
 
 export async function processLogtime(info: LogtimeInfo): Promise<string> {
-    const reg = configService.getRegistryConfig();
-    if (!reg.spreadsheetId || !reg.sheetName) return '❌ Config ไม่พร้อม';
-    const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!D:Y`, 0);
-    const result = findRow(rows, info.name, info.id);
-    const updates: { range: string; values: string[][] }[] = [];
+    return locks.logtime.run(async () => {
+        const reg = configService.getRegistryConfig();
+        if (!reg.spreadsheetId || !reg.sheetName) return '❌ Config ไม่พร้อม';
+        // อ่านค่าไม่ใช้ cache (ttl=0) เพื่อป้องกันอ่านค่าที่ล้าสมัย
+        const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!D:Y`, 0);
+        const result = findRow(rows, info.name, info.id);
+        const updates: { range: string; values: string[][] }[] = [];
 
-    switch (result.action) {
-        case 'update_time':
-            updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[info.date, info.time]] });
-            // Accumulate O-U for existing members
-            accumulateWeekday(rows, updates, info, result.row, reg.sheetName);
-            break;
+        switch (result.action) {
+            case 'update_time':
+                updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[info.date, info.time]] });
+                accumulateWeekday(rows, updates, info, result.row, reg.sheetName);
+                break;
 
-        case 'update_time_steam':
-            updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[info.date, info.time]] });
-            if (info.id) updates.push({ range: `${reg.sheetName}!M${result.row}`, values: [[info.id]] });
-            // Accumulate O-U for existing members
-            accumulateWeekday(rows, updates, info, result.row, reg.sheetName);
-            break;
+            case 'update_time_steam':
+                updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[info.date, info.time]] });
+                if (info.id) updates.push({ range: `${reg.sheetName}!M${result.row}`, values: [[info.id]] });
+                accumulateWeekday(rows, updates, info, result.row, reg.sheetName);
+                break;
 
-        case 'skip':
-            logger.info('ลงเวลา', `${info.name} -> ข้าม (มี X+Y แล้ว)`);
-            return `${info.name} -> ข้าม (มีในระบบแล้ว)`;
+            case 'skip':
+                logger.info('ลงเวลา', `${info.name} -> ข้าม (มี X+Y แล้ว)`);
+                return `${info.name} -> ข้าม (มีในระบบแล้ว)`;
 
-        case 'create_new':
-            updates.push({ range: `${reg.sheetName}!X${result.row}`, values: [[info.name]] });
-            if (info.id) updates.push({ range: `${reg.sheetName}!Y${result.row}`, values: [[info.id]] });
-            // No O-U for new X:Y entries
-            break;
-    }
+            case 'create_new':
+                updates.push({ range: `${reg.sheetName}!X${result.row}`, values: [[info.name]] });
+                if (info.id) updates.push({ range: `${reg.sheetName}!Y${result.row}`, values: [[info.id]] });
+                break;
+        }
 
-    if (updates.length > 0) await sheetService.batchUpdateValues(reg.spreadsheetId, updates);
+        if (updates.length > 0) await sheetService.batchUpdateValues(reg.spreadsheetId, updates);
 
-    const note = result.action === 'create_new'
-        ? `ใหม่ที่ X${result.row}`
-        : `แถว ${result.row}`;
-    logger.info('ลงเวลา', `${info.name} -> ${note}`);
-    return `${info.name} -> ${note}`;
+        const note = result.action === 'create_new'
+            ? `ใหม่ที่ X${result.row}`
+            : `แถว ${result.row}`;
+        logger.info('ลงเวลา', `${info.name} -> ${note}`);
+        return `${info.name} -> ${note}`;
+    });
 }
 
 /** Accumulate time into weekday columns O-U */

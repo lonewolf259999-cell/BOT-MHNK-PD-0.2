@@ -3,6 +3,7 @@ import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { truncateNickname, makeFullName } from '../../services/member.service';
 import { logger } from '../../core/logger';
+import { locks } from '../../core/lock.service';
 
 // 🔥 Queue System ป้องกัน race condition — ทำให้ registerMember ทำงานทีละคน
 let registrationQueue: Promise<any> = Promise.resolve();
@@ -15,13 +16,14 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
     return registrationQueue as Promise<T>;
 }
 
-export async function isAlreadyRegistered(userId: string): Promise<boolean> {
+export async function isAlreadyRegistered(userId: string, bypassCache = false): Promise<boolean> {
     const reg = configService.getRegistryConfig();
     if (!reg.spreadsheetId || !reg.sheetName) return false;
-    const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!E:E`, 10000);
+    const ttl = bypassCache ? 0 : 10000;
+    const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!E:E`, ttl);
     if (rows.some(row => row[0] && row[0].toString().includes(userId))) return true;
     if (reg.outSheetName) {
-        const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!E:E`, 10000);
+        const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!E:E`, ttl);
         return outRows.some(row => row[0] && row[0].toString().includes(userId));
     }
     return false;
@@ -29,7 +31,7 @@ export async function isAlreadyRegistered(userId: string): Promise<boolean> {
 
 export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
     // เช็คคร่าวๆ ก่อนเข้า queue (กันคนที่ลงทะเบียนแล้ว)
-    if (await isAlreadyRegistered(userId)) {
+    if (await isAlreadyRegistered(userId, false)) {
         logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ (pre-check)`);
         return null;
     }
@@ -42,8 +44,8 @@ async function _executeRegister(icName: string, userId: string): Promise<{ nickn
         const reg = configService.getRegistryConfig();
         if (!reg.spreadsheetId || !reg.sheetName) return null;
 
-        // ✅ Double-check: เช็คซ้ำอีกครั้งเมื่อถึงคิวจริง (กันคนที่กดติดๆ กัน)
-        const already = await isAlreadyRegistered(userId);
+        // ✅ Double-check: bypass cache เพื่อความแม่นยำ 100%
+        const already = await isAlreadyRegistered(userId, true);
         if (already) {
             logger.warn('สมัคร', `ผู้ใช้ ${userId} สมัครซ้ำ (ตรวจพบใน Queue) — ข้าม`);
             return null;
@@ -95,25 +97,26 @@ async function _executeRegister(icName: string, userId: string): Promise<{ nickn
 }
 
 export async function moveMemberToOut(userId: string): Promise<void> {
-    const reg = configService.getRegistryConfig();
-    if (!reg.spreadsheetId || !reg.sheetName || !reg.outSheetName) return;
-    const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!B:M`, 0);
-    let foundRow = -1, memberData: string[] = [];
-    for (let i = 2; i < rows.length; i++) {
-        if (rows[i] && rows[i][3] && rows[i][3].trim().includes(`<@${userId}>`)) {
-            foundRow = i + 1; memberData = new Array(12).fill('');
-            for (let c = 0; c < 12; c++) { if (rows[i][c] !== undefined) memberData[c] = rows[i][c].trim(); }
-            break;
+    return locks.sheetMutation.run(async () => {
+        const reg = configService.getRegistryConfig();
+        if (!reg.spreadsheetId || !reg.sheetName || !reg.outSheetName) return;
+        const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!B:M`, 0);
+        let foundRow = -1, memberData: string[] = [];
+        for (let i = 2; i < rows.length; i++) {
+            if (rows[i] && rows[i][3] && rows[i][3].trim().includes(`<@${userId}>`)) {
+                foundRow = i + 1; memberData = new Array(12).fill('');
+                for (let c = 0; c < 12; c++) { if (rows[i][c] !== undefined) memberData[c] = rows[i][c].trim(); }
+                break;
+            }
         }
-    }
-    if (foundRow === -1 || memberData.length === 0) { logger.warn('ย้ายออก', `ไม่พบข้อมูล ${userId}`); return; }
-    const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!B:B`, 0);
-    let nextRow = outRows.length + 1; if (nextRow < 3) nextRow = 3;
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!B${nextRow}:M${nextRow}`, [memberData]);
-    // Batch clear — 1 API call instead of 16
-    const clearCols = ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
-    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${foundRow}:U${foundRow}`, [new Array(clearCols.length).fill('')]).catch(silentCatch('Welcome'));
-    logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow}`);
+        if (foundRow === -1 || memberData.length === 0) { logger.warn('ย้ายออก', `ไม่พบข้อมูล ${userId}`); return; }
+        const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!B:B`, 0);
+        let nextRow = outRows.length + 1; if (nextRow < 3) nextRow = 3;
+        await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!B${nextRow}:M${nextRow}`, [memberData]);
+        const clearCols = ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
+        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${foundRow}:U${foundRow}`, [new Array(clearCols.length).fill('')]).catch(silentCatch('Welcome'));
+        logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow}`);
+    });
 }
 
 export async function findMemberByDiscordId(userId: string): Promise<{ row: number; codeNumber: string; currentName: string } | null> {
