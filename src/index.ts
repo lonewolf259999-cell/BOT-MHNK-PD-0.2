@@ -108,9 +108,6 @@ async function start(): Promise<void> {
     const { setupBypdFeature } = await import('./features/bypd/listener');
     setupBypdFeature(client);
 
-    const { setupProctorFeature } = await import('./features/proctor/listener');
-    setupProctorFeature(client);
-
     const { setupReloadFeature } = await import('./features/reload/listener');
     setupReloadFeature(client);
 

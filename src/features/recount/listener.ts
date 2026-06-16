@@ -110,7 +110,7 @@ export function setupRecountFeature(client: Client): void {
                         break;
                     }
                     case 'modal_cfg_welcome': await save([['WELCOME_CHANNEL_ID', i.fields.getTextInputValue('input_welcome_channel').trim()], ['LOG_CHANNEL_ID', i.fields.getTextInputValue('input_log_channel').trim()], ['LOGTIME_CHANNEL_ID', i.fields.getTextInputValue('input_logtime_channel').trim()]]); await replyAndDelete(i, '✅ บันทึกตั้งค่าต้อนรับแล้ว'); break;
-                    case 'modal_cfg_bypd': await save([['LOGCASE_CHANNEL_ID', i.fields.getTextInputValue('input_logcase_channel').trim()], ['BYPD_SEND_CHANNEL_ID', i.fields.getTextInputValue('input_bypd_send').trim()], ['PROCTOR_CHANNEL_ID', i.fields.getTextInputValue('input_proctor_channel').trim()]]); await replyAndDelete(i, '✅ บันทึกตั้งค่า LogCase + BYPD + Proctor แล้ว'); break;
+                    case 'modal_cfg_bypd': await save([['LOGCASE_CHANNEL_ID', i.fields.getTextInputValue('input_logcase_channel').trim()], ['BYPD_SEND_CHANNEL_ID', i.fields.getTextInputValue('input_bypd_send').trim()]]); await replyAndDelete(i, '✅ บันทึกตั้งค่า LogCase + BYPD แล้ว'); break;
                     case 'modal_cfg_registry': await save([['REGISTRY_SPREADSHEET_ID', i.fields.getTextInputValue('input_registry_sheet_id').trim()], ['REGISTRY_SHEET_NAME', i.fields.getTextInputValue('input_registry_sheet_name').trim()], ['REGISTRY_OUT_SHEET_NAME', i.fields.getTextInputValue('input_registry_out_sheet').trim()]]); await replyAndDelete(i, '✅ บันทึกตั้งค่าชีต PD แล้ว'); break;
                 }
             } catch (e) { logger.error('RECOUNT', `Modal error: ${e}`); try { await i.editReply({ content: '❌ เกิดข้อผิดพลาด' }); } catch {} }
@@ -128,7 +128,7 @@ async function runResendMissed(client: Client, i: any, abortSignal: AbortSignal)
     if (!logChannelId || !guild) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
     const logChannel = guild.channels.cache.get(logChannelId);
     if (!logChannel || !logChannel.isTextBased()) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
-    let scanned = 0, bypdSent = 0, proctorSent = 0, failed = 0, bypdAlready = 0, proctorAlready = 0;
+    let scanned = 0, bypdSent = 0, failed = 0, bypdAlready = 0;
     let lastId: string | undefined;
     while (true) {
         if (abortSignal.aborted) break;
@@ -137,15 +137,10 @@ async function runResendMissed(client: Client, i: any, abortSignal: AbortSignal)
         const batch = [...messages.values()].reverse();
         for (const msg of batch) {
             const hasBypd = hasBypdInMessage(msg);
-            const isProctor = msg.embeds?.[0]?.title?.includes('📋 บันทึกการคุมสอบ Proctor') ?? false;
             const hasCheck = msg.reactions.cache.some((r: any) => r.emoji.name === '✅');
             if (hasBypd && !hasCheck) { try { await processBypd(msg); bypdSent++; } catch { failed++; } await new Promise(r => setTimeout(r, 500)); } else if (hasBypd && hasCheck) bypdAlready++;
-            if (isProctor && !hasCheck) {
-                try { const targetId = configService.getProctorChannelId(); if (targetId) { const target = guild.channels.cache.get(targetId); if (target?.isTextBased()) { await target.send({ embeds: [msg.embeds[0]] }); await msg.react('✅').catch(silentCatch('Recount')); proctorSent++; } } } catch { failed++; }
-                await new Promise(r => setTimeout(r, 500));
-            } else if (isProctor && hasCheck) proctorAlready++;
         }
         scanned += batch.length; lastId = messages.last()?.id;
     }
-    return { sent: bypdSent + proctorSent, failed, message: abortSignal.aborted ? `⏹️ หยุดส่งย้อนหลังแล้ว\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยส่งแล้ว: BYPD ${bypdAlready} | Proctor ${proctorAlready}` : `✅ ส่งย้อนหลังเสร็จสิ้น\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยส่งแล้ว: BYPD ${bypdAlready} | Proctor ${proctorAlready}` };
+    return { sent: bypdSent, failed, message: abortSignal.aborted ? `⏹️ หยุดส่งย้อนหลังแล้ว\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | ❌ ${failed}\n📊 เคยส่งแล้ว: BYPD ${bypdAlready}` : `✅ ส่งย้อนหลังเสร็จสิ้น\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | ❌ ${failed}\n📊 เคยส่งแล้ว: BYPD ${bypdAlready}` };
 }

@@ -21,10 +21,9 @@ export function createPanelEmbed(): EmbedBuilder {
             `• Welcome: ${ch(configService.getWelcomeChannelId())}\n` +
             `• Log ลงทะเบียน: ${ch(configService.getLogChannelId())}\n` +
             `• Log เวร: ${ch(configService.getLogtimeChannelId())}\n\n` +
-            '**BYPD + Proctor**\n' +
+            '**BYPD / LogCase**\n' +
             `• LogCase: ${ch(configService.getLogCaseChannelId())}\n` +
-            `• ส่ง BYPD: ${ch(configService.getBypdSendChannelId())}\n` +
-            `• ส่ง Proctor: ${ch(configService.getProctorChannelId())}\n\n` +
+            `• ส่ง BYPD: ${ch(configService.getBypdSendChannelId())}\n\n` +
             '**ชีตลงทะเบียน PD**\n' +
             `• ID: \`${reg.spreadsheetId}\`\n` +
             `• แท็บ: \`${reg.sheetName}\` | ออก: \`${reg.outSheetName}\``

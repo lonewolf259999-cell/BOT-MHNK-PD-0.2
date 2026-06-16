@@ -14,8 +14,6 @@ export class ConfigService {
     private logtimeChannelId = '';
     private logCaseChannelId = '';
     private bypdSendChannelId = '';
-    private proctorChannelId = '';
-
     async load(): Promise<void> {
         try {
             const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 30000);
@@ -31,7 +29,6 @@ export class ConfigService {
             this.logtimeChannelId = this.data.LOGTIME_CHANNEL_ID || '';
             this.logCaseChannelId = this.data.LOGCASE_CHANNEL_ID || '';
             this.bypdSendChannelId = this.data.BYPD_SEND_CHANNEL_ID || '';
-            this.proctorChannelId = this.data.PROCTOR_CHANNEL_ID || '';
             this.loaded = true;
             logger.info('CONFIG', 'โหลด Config จาก Google Sheet สำเร็จ');
         } catch (error) {
@@ -51,7 +48,6 @@ export class ConfigService {
     getLogtimeChannelId(): string { return this.logtimeChannelId; }
     getLogCaseChannelId(): string { return this.logCaseChannelId; }
     getBypdSendChannelId(): string { return this.bypdSendChannelId; }
-    getProctorChannelId(): string { return this.proctorChannelId; }
     getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
     getPendingSheetName(): string { return this.pendingSheetName; }
 

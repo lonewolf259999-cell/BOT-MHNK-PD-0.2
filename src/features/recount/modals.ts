@@ -35,10 +35,9 @@ export function buildWelcomeModal(): ModalBuilder {
 }
 
 export function buildBypdModal(): ModalBuilder {
-    return createModal('modal_cfg_bypd', 'ตั้งค่า — BYPD + Proctor + LogCase', [
+    return createModal('modal_cfg_bypd', 'ตั้งค่า — BYPD + LogCase', [
         ['input_logcase_channel', 'LOGCASE_CHANNEL_ID', configService.getLogCaseChannelId()],
         ['input_bypd_send', 'BYPD_SEND_CHANNEL_ID', configService.getBypdSendChannelId()],
-        ['input_proctor_channel', 'PROCTOR_CHANNEL_ID', configService.getProctorChannelId()],
     ]);
 }
 
