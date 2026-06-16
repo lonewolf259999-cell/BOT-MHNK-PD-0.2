@@ -8,32 +8,24 @@ import { truncateNickname, makeFullName } from '../../services/member.service';
 /**
  * ตรวจสอบว่า Discord ID นี้ถูก Pre-approved (ผ่าน Admin Approve ใน Pending Sheet) หรือยัง
  */
-export async function checkPreApproved(discordId: string): Promise<{ approved: boolean; icName?: string; icPhone?: string }> {
+export async function checkPreApproved(discordId: string): Promise<{ approved: boolean; icName?: string; icPhone?: string; ocAge?: string }> {
     const spreadsheetId = configService.getPendingSpreadsheetId();
     const sheetName = configService.getPendingSheetName();
-    if (!spreadsheetId || !sheetName) {
-        logger.warn('Pre-Approved', `Pending config ไม่ถูกต้อง: sheetId=${spreadsheetId}, sheetName=${sheetName}`);
-        return { approved: false };
-    }
-
-    logger.debug('Pre-Approved', `ค้นหา ${discordId} ใน sheetId=${spreadsheetId} sheetName=${sheetName}`);
+    if (!spreadsheetId || !sheetName) return { approved: false };
 
     try {
-        const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!B:H`, 0);
-        logger.debug('Pre-Approved', `อ่าน Pending Sheet ได้ ${rows.length} แถว`);
-        // Debug: log ทุกแถวที่อ่านได้
-        for (let i = 0; i < rows.length; i++) {
-            const r = rows[i];
-            logger.debug('Pre-Approved', `แถว ${i}: B="${r[1] || ''}" H="${r[7] || ''}"`);
-        }
-        for (const row of rows) {
+        const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!A:H`, 0);
+        // ข้ามแถว 0 (Header row)
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
             const pendingDiscordId = (row[1] || '').trim(); // Column B = Discord ID
             const status = (row[7] || '').trim();           // Column H = สถานะ
             if (pendingDiscordId === discordId && status === 'อนุมัติ') {
                 const icName = (row[3] || '').trim();   // Column D = ชื่อ IC
                 const icPhone = (row[4] || '').trim();  // Column E = เบอร์ IC
+                const ocAge = (row[5] || '').trim();    // Column F = อายุ OOC
                 logger.info('Pre-Approved', `พบ ${discordId} ผ่านการอนุมัติแล้ว (IC: ${icName})`);
-                return { approved: true, icName, icPhone };
+                return { approved: true, icName, icPhone, ocAge };
             }
         }
         return { approved: false };
@@ -68,12 +60,10 @@ export async function isAlreadyRegistered(userId: string, bypassCache = false): 
 }
 
 export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
-    // เช็คคร่าวๆ ก่อนเข้า queue (กันคนที่ลงทะเบียนแล้ว)
     if (await isAlreadyRegistered(userId, false)) {
         logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ (pre-check)`);
         return null;
     }
-    // เข้า queue — จะทำงานทีละคน ป้องกัน race condition
     return enqueue(() => _executeRegister(icName, userId));
 }
 
@@ -82,7 +72,6 @@ async function _executeRegister(icName: string, userId: string): Promise<{ nickn
         const reg = configService.getRegistryConfig();
         if (!reg.spreadsheetId || !reg.sheetName) return null;
 
-        // ✅ Double-check: bypass cache เพื่อความแม่นยำ 100%
         const already = await isAlreadyRegistered(userId, true);
         if (already) {
             logger.warn('สมัคร', `ผู้ใช้ ${userId} สมัครซ้ำ (ตรวจพบใน Queue) — ข้าม`);
@@ -92,7 +81,6 @@ async function _executeRegister(icName: string, userId: string): Promise<{ nickn
         const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:D`, 0);
         let targetRow = -1, codeNumber = '';
 
-        // หาแถวว่าง: C มีค่า, D ว่าง
         for (let i = 2; i < rows.length; i++) {
             if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) {
                 targetRow = i + 1;
@@ -101,7 +89,6 @@ async function _executeRegister(icName: string, userId: string): Promise<{ nickn
             }
         }
 
-        // ถ้าไม่เจอใน range ที่อ่านมา → ลองขยายออกไปอีก 20 แถว
         if (targetRow === -1) {
             const dyn = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C${rows.length + 1}:C${rows.length + 20}`, 0);
             for (let j = 0; j < dyn.length; j++) {
@@ -127,10 +114,23 @@ async function _executeRegister(icName: string, userId: string): Promise<{ nickn
         await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
         logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
         return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
-
     } catch (error) {
         logger.error('สมัคร', `เกิดข้อผิดพลาด: ${error}`);
         return null;
+    }
+}
+
+/**
+ * ตรวจสอบว่า Discord ID นี้อยู่ใน OutDC (ถูกถอดออกจากระบบ) หรือไม่
+ */
+export async function checkInOutDc(userId: string): Promise<boolean> {
+    const reg = configService.getRegistryConfig();
+    if (!reg.spreadsheetId || !reg.outSheetName) return false;
+    try {
+        const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!B:B`, 0);
+        return rows.some(row => row[0] && row[0].includes(userId));
+    } catch {
+        return false;
     }
 }
 
@@ -151,9 +151,10 @@ export async function moveMemberToOut(userId: string): Promise<void> {
         const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!B:B`, 0);
         let nextRow = outRows.length + 1; if (nextRow < 3) nextRow = 3;
         await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!B${nextRow}:M${nextRow}`, [memberData]);
-        const clearCols = ['B', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'M', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
-        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${foundRow}:U${foundRow}`, [new Array(clearCols.length).fill('')]).catch(silentCatch('Welcome'));
-        logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow}`);
+        // ลบข้อมูลเฉพาะ D, E, F (ชื่อ, Discord ID, ตำแหน่ง) ไม่ลบคอลัมน์ C (Code)
+        const clearCols = ['D', 'E', 'F', 'G', 'H'];
+        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${foundRow}:H${foundRow}`, [new Array(5).fill('')]).catch(silentCatch('Welcome'));
+        logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow} (คง C ไว้)`);
     });
 }
 
