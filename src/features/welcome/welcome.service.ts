@@ -1,9 +1,36 @@
 import { sheetService } from '../../core/sheet.service';
 import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
-import { truncateNickname, makeFullName } from '../../services/member.service';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
+import { truncateNickname, makeFullName } from '../../services/member.service';
+
+/**
+ * ตรวจสอบว่า Discord ID นี้ถูก Pre-approved (ผ่าน Admin Approve ใน Pending Sheet) หรือยัง
+ */
+export async function checkPreApproved(discordId: string): Promise<{ approved: boolean; icName?: string; icPhone?: string }> {
+    const spreadsheetId = configService.getPendingSpreadsheetId();
+    const sheetName = configService.getPendingSheetName();
+    if (!spreadsheetId || !sheetName) return { approved: false };
+
+    try {
+        const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!B:H`, 0);
+        for (const row of rows) {
+            const pendingDiscordId = (row[1] || '').trim(); // Column B = Discord ID
+            const status = (row[7] || '').trim();           // Column H = สถานะ
+            if (pendingDiscordId === discordId && status === 'อนุมัติ') {
+                const icName = (row[3] || '').trim();   // Column D = ชื่อ IC
+                const icPhone = (row[4] || '').trim();  // Column E = เบอร์ IC
+                logger.info('Pre-Approved', `พบ ${discordId} ผ่านการอนุมัติแล้ว (IC: ${icName})`);
+                return { approved: true, icName, icPhone };
+            }
+        }
+        return { approved: false };
+    } catch (err) {
+        logger.error('Pre-Approved', `ตรวจสอบ Pending Sheet ล้มเหลว: ${err}`);
+        return { approved: false };
+    }
+}
 
 // 🔥 Queue System ป้องกัน race condition — ทำให้ registerMember ทำงานทีละคน
 let registrationQueue: Promise<any> = Promise.resolve();

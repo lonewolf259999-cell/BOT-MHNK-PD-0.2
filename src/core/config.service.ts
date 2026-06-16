@@ -7,6 +7,8 @@ export class ConfigService {
     private loaded = false;
     private countConfig = { SPREADSHEET_ID: '', SHEET_NAME: '', CHANNELS: { CHANNEL_1: '', CHANNEL_2: '', CHANNEL_3: '', CHANNEL_4: '', CHANNEL_5: '' } };
     private registryConfig = { spreadsheetId: '', sheetName: '', outSheetName: '' };
+    private pendingSpreadsheetId = '';
+    private pendingSheetName = '';
     private welcomeChannelId = '';
     private logChannelId = '';
     private logtimeChannelId = '';
@@ -22,6 +24,8 @@ export class ConfigService {
             const parts = (this.data.COUNT_CHANNEL_IDS || '').split(',');
             this.countConfig = { SPREADSHEET_ID: this.data.SPREADSHEET_ID || '', SHEET_NAME: this.data.SHEET_NAME || '', CHANNELS: { CHANNEL_1: (parts[0] || this.data.CHANNEL_ID_1 || '').trim(), CHANNEL_2: (parts[1] || this.data.CHANNEL_ID_2 || '').trim(), CHANNEL_3: (parts[2] || this.data.CHANNEL_ID_3 || '').trim(), CHANNEL_4: (parts[3] || this.data.CHANNEL_ID_4 || '').trim(), CHANNEL_5: (parts[4] || this.data.CHANNEL_ID_5 || '').trim() } };
             this.registryConfig = { spreadsheetId: this.data.REGISTRY_SPREADSHEET_ID || '', sheetName: this.data.REGISTRY_SHEET_NAME || '', outSheetName: this.data.REGISTRY_OUT_SHEET_NAME || '' };
+            this.pendingSpreadsheetId = this.data.PENDING_SPREADSHEET_ID || this.data.REGISTRY_SPREADSHEET_ID || '';
+            this.pendingSheetName = this.data.PENDING_SHEET_NAME || 'Pending';
             this.welcomeChannelId = this.data.WELCOME_CHANNEL_ID || '';
             this.logChannelId = this.data.LOG_CHANNEL_ID || '';
             this.logtimeChannelId = this.data.LOGTIME_CHANNEL_ID || '';
@@ -48,6 +52,8 @@ export class ConfigService {
     getLogCaseChannelId(): string { return this.logCaseChannelId; }
     getBypdSendChannelId(): string { return this.bypdSendChannelId; }
     getProctorChannelId(): string { return this.proctorChannelId; }
+    getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
+    getPendingSheetName(): string { return this.pendingSheetName; }
 
     async writeConfigKeys(updates: [string, string][]): Promise<void> {
         const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 0);

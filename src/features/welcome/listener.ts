@@ -1,7 +1,7 @@
 import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } from 'discord.js';
 import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
-import { isAlreadyRegistered, registerMember, moveMemberToOut } from './welcome.service';
+import { isAlreadyRegistered, registerMember, moveMemberToOut, checkPreApproved } from './welcome.service';
 import { logger } from '../../core/logger';
 
 const RATE_LIMIT = new Map<string, number>();
@@ -18,11 +18,98 @@ export function setupWelcomeFeature(client: Client): void {
             if (!chId) return;
             const ch = member.guild.channels.cache.get(chId);
             if (!ch || !ch.isTextBased()) return;
-            await ch.send({
-                embeds: [new EmbedBuilder().setColor('#3aca1d').setTitle('🎉 ยินดีต้อนรับสู่ Mahanakorn Diwa!').setDescription(`ยินดีต้อนรับ <@${member.user.id}> สู่ Mahanakorn Diwa!\n กดลงทะเบียนก่อนนะ 🎉`).setThumbnail(member.user.displayAvatarURL()).addFields({ name: '👤 สมาชิกใหม่', value: `<@${member.user.id}>`, inline: true }, { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true }).setFooter({ text: `${client.user?.username} • วันนี้` }).setTimestamp()],
-                components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('btn_register').setLabel('กรอกชื่อ IC ตามบัตรในเมือง').setStyle(ButtonStyle.Success).setEmoji('📝'))]
-            });
-            logger.info('ต้อนรับ', `ส่งข้อความต้อนรับให้ ${member.user.tag}`);
+
+            // ตรวจสอบว่าผู้ใช้ Pre-approved หรือยัง
+            const preApproved = await checkPreApproved(member.user.id);
+            if (preApproved.approved && preApproved.icName) {
+                // ✅ Pre-approved: ลงทะเบียนอัตโนมัติ ไม่ต้องกรอก Modal
+                const result = await registerMember(preApproved.icName, member.user.id);
+                if (result) {
+                    let nickChanged = true;
+                    try { await member.setNickname(result.nickname); } catch { nickChanged = false; }
+
+                    await ch.send({
+                        embeds: [new EmbedBuilder()
+                            .setColor('#3aca1d')
+                            .setTitle('🌟 ยินดีต้อนรับ! ลงทะเบียนสำเร็จ')
+                            .setDescription(`ยินดีต้อนรับ <@${member.user.id}> สู่ Mahanakorn Diwa!\n✅ **ลงทะเบียนอัตโนมัติ** ผ่านการอนุมัติจาก Admin`)
+                            .setThumbnail(member.user.displayAvatarURL())
+                            .addFields(
+                                { name: '📛 ชื่อในระบบ', value: `\`${result.nickname}\``, inline: false },
+                                { name: '👤 สมาชิก', value: `<@${member.user.id}>`, inline: true },
+                                { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true },
+                                { name: '📱 สถานะเปลี่ยนชื่อ', value: nickChanged ? '✅ สำเร็จ' : '❌ ไม่มีสิทธิ์', inline: true }
+                            )
+                            .setFooter({ text: `${client.user?.username} • Auto Approve` })
+                            .setTimestamp()
+                        ]
+                    });
+
+                    const logChId = configService.getLogChannelId();
+                    if (logChId) {
+                        const logCh = member.guild.channels.cache.get(logChId);
+                        if (logCh?.isTextBased()) {
+                            await logCh.send({
+                                embeds: [new EmbedBuilder()
+                                    .setColor('#a0c400')
+                                    .setTitle('📝 Auto-Register (Pre-Approved)')
+                                    .setDescription(`<@${member.user.id}> ลงทะเบียนอัตโนมัติเมื่อเข้า Discord B`)
+                                    .addFields(
+                                        { name: '🆔 Discord', value: `\`${member.user.id}\``, inline: true },
+                                        { name: '📛 ชื่อ IC', value: preApproved.icName, inline: true },
+                                        { name: '⚙️ ชื่อระบบ', value: `\`${result.nickname}\``, inline: false },
+                                        { name: '📞 เบอร์', value: preApproved.icPhone || '—', inline: true },
+                                        { name: '🏷️ ตำแหน่ง', value: 'นักเรียนตำรวจ', inline: true }
+                                    )
+                                    .setTimestamp()
+                                ]
+                            });
+                        }
+                    }
+
+                    logger.info('ต้อนรับ', `Auto-register Pre-approved: ${member.user.tag} (${result.nickname})`);
+                } else {
+                    // ลงทะเบียนไม่สำเร็จ (อาจซ้ำ) ส่ง embed แบบไม่มีปุ่ม
+                    await ch.send({
+                        embeds: [new EmbedBuilder()
+                            .setColor('#FFA500')
+                            .setTitle('⚠️ ยินดีต้อนรับ — แต่ไม่สามารถลงทะเบียนอัตโนมัติ')
+                            .setDescription(`<@${member.user.id}> กรุณาใช้ปุ่มด้านล่างเพื่อลงทะเบียน`)
+                            .setThumbnail(member.user.displayAvatarURL())
+                            .addFields(
+                                { name: '👤 สมาชิก', value: `<@${member.user.id}>`, inline: true },
+                                { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true }
+                            )
+                            .setFooter({ text: `${client.user?.username} • Auto Approve Failed` })
+                            .setTimestamp()
+                        ],
+                        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+                            new ButtonBuilder().setCustomId('btn_register').setLabel('ลงทะเบียน').setStyle(ButtonStyle.Success).setEmoji('📝')
+                        )]
+                    });
+                }
+            } else {
+                // ❌ ไม่ได้ Pre-approved: แสดงปุ่มลงทะเบียนเหมือนเดิม
+                await ch.send({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#3aca1d')
+                        .setTitle('🎉 ยินดีต้อนรับสู่ Mahanakorn Diwa!')
+                        .setDescription(`ยินดีต้อนรับ <@${member.user.id}> สู่ Mahanakorn Diwa!\nกดลงทะเบียนก่อนนะ 🎉`)
+                        .setThumbnail(member.user.displayAvatarURL())
+                        .addFields(
+                            { name: '👤 สมาชิกใหม่', value: `<@${member.user.id}>`, inline: true },
+                            { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true }
+                        )
+                        .setFooter({ text: `${client.user?.username} • วันนี้` })
+                        .setTimestamp()
+                    ],
+                    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+                        new ButtonBuilder().setCustomId('btn_register').setLabel('กรอกชื่อ IC ตามบัตรในเมือง').setStyle(ButtonStyle.Success).setEmoji('📝')
+                    )]
+                });
+            }
+
+            logger.info('ต้อนรับ', `ส่งข้อความต้อนรับให้ ${member.user.tag} (preApproved=${preApproved.approved})`);
         } catch (e) { logger.error('ต้อนรับ', `GuildMemberAdd error: ${e}`); }
     });
 
