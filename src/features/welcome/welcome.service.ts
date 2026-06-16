@@ -21,6 +21,11 @@ export async function checkPreApproved(discordId: string): Promise<{ approved: b
     try {
         const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!B:H`, 0);
         logger.debug('Pre-Approved', `อ่าน Pending Sheet ได้ ${rows.length} แถว`);
+        // Debug: log ทุกแถวที่อ่านได้
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            logger.debug('Pre-Approved', `แถว ${i}: B="${r[1] || ''}" H="${r[7] || ''}"`);
+        }
         for (const row of rows) {
             const pendingDiscordId = (row[1] || '').trim(); // Column B = Discord ID
             const status = (row[7] || '').trim();           // Column H = สถานะ
