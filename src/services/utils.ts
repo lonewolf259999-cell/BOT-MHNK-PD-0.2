@@ -51,14 +51,41 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Column letter to index (A=0, B=1, ...)
+ * Centralized rate limit helper.
+ * Replaces duplicate Map + logic in each feature.
  */
-export function colToIndex(col: string): number {
-    let index = 0;
-    for (let i = 0; i < col.length; i++) {
-        index = index * 26 + (col.charCodeAt(i) - 64);
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * Check if action is rate limited.
+ * @returns true if allowed, false if rate limited
+ */
+export function checkRateLimit(key: string, windowMs: number, limit: number): boolean {
+    const now = Date.now();
+    const entry = rateLimitMap.get(key);
+    if (!entry || now > entry.resetAt) {
+        rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+        return true;
     }
-    return index - 1;
+    if (entry.count >= limit) return false;
+    entry.count++;
+    return true;
+}
+
+/**
+ * Clear rate limit for a key (e.g. on success).
+ */
+export function clearRateLimit(key: string): void {
+    rateLimitMap.delete(key);
+}
+
+/**
+ * Get text channel from guild cache, returns null if not found or not text-based.
+ */
+export function getTextChannel(guild: any, channelId: string): any | null {
+    if (!guild || !channelId) return null;
+    const ch = guild.channels.cache.get(channelId);
+    return ch?.isTextBased?.() ? ch : null;
 }
 
 /**

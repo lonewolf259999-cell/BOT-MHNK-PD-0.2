@@ -31,8 +31,9 @@ export function setupEditPdFeature(client: Client): void {
                     if (msg.embeds.length > 0) { const f = msg.embeds[0].fields?.find((x: any) => x.name.includes('Discord ID')); if (f && f.value.replace(/`/g, '').trim() === uid) embedMsg = msg; }
                 }
                 if (!embedMsg) return i.editReply({ content: '❌ ไม่พบประวัติการลงทะเบียน' });
+                let info: { row: number; codeNumber: string; currentName: string } | null = null;
                 if (newName) {
-                    const info = await findMemberByDiscordId(uid);
+                    info = await findMemberByDiscordId(uid);
                     if (info) {
                         const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
                         await updateMemberName(info.row, full);
@@ -41,7 +42,7 @@ export function setupEditPdFeature(client: Client): void {
                     }
                 }
                 let e = EmbedBuilder.from(embedMsg.embeds[0]);
-                if (newName) { e = e.spliceFields(1, 1, { name: '📛 ชื่อ IC', value: newName, inline: true }); const info = await findMemberByDiscordId(uid).catch(() => null); if (info) { const full = `${info.codeNumber} [MHNK-PD] ${newName}`; e = e.spliceFields(2, 1, { name: '⚙️ ชื่อในระบบ (คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ)', value: `\`${truncateNickname(full)}\``, inline: false }); } }
+                if (newName) { e = e.spliceFields(1, 1, { name: '📛 ชื่อ IC', value: newName, inline: true }); if (info) { const full = `${info.codeNumber} [MHNK-PD] ${newName}`; e = e.spliceFields(2, 1, { name: '⚙️ ชื่อในระบบ (คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ)', value: `\`${truncateNickname(full)}\``, inline: false }); } }
                 if (newPhone) { e = e.spliceFields(3, 1, { name: '📞 เบอร์โทร IC', value: newPhone, inline: true }); changed.push(`เบอร์โทร → **${newPhone}**`); }
                 if (newAge) { e = e.spliceFields(4, 1, { name: '🎂 อายุ OOC', value: `${newAge} ปี`, inline: true }); changed.push(`อายุ → **${newAge}**`); }
                 await embedMsg.edit({ embeds: [e] });

@@ -18,7 +18,19 @@ function getTagsFromMessage(content: string, guild: any): { id: string; nickname
     return tags;
 }
 
-function cleanupLog(): void { const n = Date.now(); if (n - lastCleanup > CLEANUP_INTERVAL) { messageLog.clear(); lastCleanup = n; } }
+function cleanupLog(): void {
+    const n = Date.now();
+    if (n - lastCleanup > CLEANUP_INTERVAL) {
+        if (messageLog.size > 2000) {
+            // ถ้าเกิน 2000 ให้ลบ oldest 50% ทิ้ง
+            const keys = [...messageLog.keys()].slice(0, Math.floor(messageLog.size / 2));
+            for (const k of keys) messageLog.delete(k);
+        } else {
+            messageLog.clear();
+        }
+        lastCleanup = n;
+    }
+}
 
 export function setupCountFeature(client: Client): void {
     client.once(Events.ClientReady, async () => {
@@ -50,6 +62,10 @@ export function setupCountFeature(client: Client): void {
             await processCountBatch(tags, message.channel.id, true);
         } catch (e) { logger.error('นับเคส', `MessageDelete: ${e}`); }
     });
+
+    // กำหนด cleanup อัตโนมัติทุก 24 ชั่วโมง
+    setInterval(cleanupLog, CLEANUP_INTERVAL);
+    cleanupLog(); // เรียกครั้งแรกตอน start
 
     client.on(Events.MessageUpdate, async (oldM, newM: any) => {
         try {

@@ -130,8 +130,8 @@ export class SheetService {
         this.invalidateCache(spreadsheetId);
     }
 
-    private invalidateCache(_spreadsheetId: string): void {
-        cache.clear();
+    private invalidateCache(spreadsheetId: string): void {
+        cache.deleteByPrefix(`sheet:${spreadsheetId}:`);
     }
 }
 

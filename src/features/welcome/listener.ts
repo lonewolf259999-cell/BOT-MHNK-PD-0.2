@@ -1,7 +1,8 @@
-import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
+import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, type ColorResolvable } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { sheetService } from '../../core/sheet.service';
 import { registerMember, moveMemberToOut, checkPreApproved, checkInOutDc, isAlreadyRegistered } from './welcome.service';
+import { getTextChannel } from '../../services/utils';
 import { logger } from '../../core/logger';
 
 /**
@@ -42,29 +43,49 @@ function buildWelcomeEmbed(userId: string, displayAvatarUrl: string, nickname: s
     return embed;
 }
 
+/**
+ * สร้าง embed ต้อนรับแบบทั่วไป (ใช้แทนการสร้าง EmbedBuilder ซ้ำ 3 แบบ)
+ * @param color - สี embed
+ * @param title - หัวข้อ
+ * @param description - คำอธิบาย
+ * @param userId - Discord ID
+ * @param avatar - URL รูปผู้ใช้
+ * @param memberCount - จำนวนสมาชิก
+ * @param footer - ข้อความ footer
+ * @param isNewMember - true = field name "👤 สมาชิกใหม่" / false = "👤 สมาชิก"
+ */
+function buildWelcomeEmbedV2(color: ColorResolvable, title: string, description: string, userId: string, avatar: string, memberCount: number, footer: string, isNewMember = false) {
+    return new EmbedBuilder()
+        .setColor(color)
+        .setTitle(title)
+        .setDescription(description)
+        .setThumbnail(avatar)
+        .addFields(
+            { name: isNewMember ? '👤 สมาชิกใหม่' : '👤 สมาชิก', value: `<@${userId}>`, inline: true },
+            { name: '👥 สมาชิกรวม', value: `${memberCount} คน`, inline: true }
+        )
+        .setFooter({ text: footer })
+        .setTimestamp();
+}
+
 export function setupWelcomeFeature(client: Client): void {
     client.on(Events.GuildMemberAdd, async (member) => {
         try {
-            const chId = configService.getWelcomeChannelId();
-            if (!chId) return;
-            const ch = member.guild.channels.cache.get(chId);
-            if (!ch || !ch.isTextBased()) return;
+            const ch = getTextChannel(member.guild, configService.getWelcomeChannelId());
+            if (!ch) return;
 
             const isOutDc = await checkInOutDc(member.user.id);
             if (isOutDc) {
                 await ch.send({
-                    embeds: [new EmbedBuilder()
-                        .setColor('#808080')
-                        .setTitle('ℹ️ ยินดีต้อนรับอีกครั้ง')
-                        .setDescription(`<@${member.user.id}> ยินดีต้อนรับสู่ Mahanakorn Diwa!\n⚠️ **คุณมีชื่อในระบบที่ถูกถอดออกแล้ว** กรุณาติดต่อ Admin หากต้องการกลับเข้ามาทำงาน`)
-                        .setThumbnail(member.user.displayAvatarURL())
-                        .addFields(
-                            { name: '👤 สมาชิก', value: `<@${member.user.id}>`, inline: true },
-                            { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true }
-                        )
-                        .setFooter({ text: `${client.user?.username} • อดีตตำรวจ` })
-                        .setTimestamp()
-                    ],
+                    embeds: [buildWelcomeEmbedV2(
+                        '#808080',
+                        'ℹ️ ยินดีต้อนรับอีกครั้ง',
+                        `<@${member.user.id}> ยินดีต้อนรับสู่ Mahanakorn Diwa!\n⚠️ **คุณมีชื่อในระบบที่ถูกถอดออกแล้ว** กรุณาติดต่อ Admin หากต้องการกลับเข้ามาทำงาน`,
+                        member.user.id,
+                        member.user.displayAvatarURL(),
+                        member.guild.memberCount,
+                        `${client.user?.username} • อดีตตำรวจ`
+                    )],
                     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
                         new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
                     )]
@@ -80,12 +101,10 @@ export function setupWelcomeFeature(client: Client): void {
                     let nickChanged = true;
                     try { await member.setNickname(result.nickname); } catch { nickChanged = false; }
 
-                    // ส่ง 🎉 ไป Welcome Channel
                     await ch.send({
                         embeds: [buildWelcomeEmbed(member.user.id, member.user.displayAvatarURL(), result.nickname, member.guild.memberCount)]
                     });
 
-                    // ส่ง 📝 ไป Log Channel
                     const regEmbed = buildRegEmbed(
                         member.user.id,
                         preApproved.icName,
@@ -95,28 +114,22 @@ export function setupWelcomeFeature(client: Client): void {
                         nickChanged
                     );
 
-                    const logChId = configService.getLogChannelId();
-                    if (logChId) {
-                        const logCh = member.guild.channels.cache.get(logChId);
-                        if (logCh?.isTextBased()) {
-                            await logCh.send({ content: `<@${member.user.id}>`, embeds: [regEmbed] });
-                        }
+                    const logCh = getTextChannel(member.guild, configService.getLogChannelId());
+                    if (logCh) {
+                        await logCh.send({ content: `<@${member.user.id}>`, embeds: [regEmbed] });
                     }
                     logger.info('ต้อนรับ', `Auto-register Pre-approved: ${member.user.tag} (${result.nickname})`);
                 } else {
                     await ch.send({
-                        embeds: [new EmbedBuilder()
-                            .setColor('#FFA500')
-                            .setTitle('⚠️ ยินดีต้อนรับ — ไม่สามารถลงทะเบียนอัตโนมัติ')
-                            .setDescription(`<@${member.user.id}> ยินดีต้อนรับสู่ Mahanakorn Diwa!\n❌ ไม่สามารถลงทะเบียนให้คุณได้ (อาจซ้ำหรือข้อมูลไม่ถูกต้อง) กรุณาติดต่อ Admin`)
-                            .setThumbnail(member.user.displayAvatarURL())
-                            .addFields(
-                                { name: '👤 สมาชิก', value: `<@${member.user.id}>`, inline: true },
-                                { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true }
-                            )
-                            .setFooter({ text: `${client.user?.username} • Auto Approve Failed` })
-                            .setTimestamp()
-                        ],
+                        embeds: [buildWelcomeEmbedV2(
+                            '#FFA500',
+                            '⚠️ ยินดีต้อนรับ — ไม่สามารถลงทะเบียนอัตโนมัติ',
+                            `<@${member.user.id}> ยินดีต้อนรับสู่ Mahanakorn Diwa!\n❌ ไม่สามารถลงทะเบียนให้คุณได้ (อาจซ้ำหรือข้อมูลไม่ถูกต้อง) กรุณาติดต่อ Admin`,
+                            member.user.id,
+                            member.user.displayAvatarURL(),
+                            member.guild.memberCount,
+                            `${client.user?.username} • Auto Approve Failed`
+                        )],
                         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
                             new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
                         )]
@@ -124,18 +137,16 @@ export function setupWelcomeFeature(client: Client): void {
                 }
             } else {
                 await ch.send({
-                    embeds: [new EmbedBuilder()
-                        .setColor('#3aca1d')
-                        .setTitle('🎉 ยินดีต้อนรับสู่ Mahanakorn Diwa!')
-                        .setDescription(`ยินดีต้อนรับ <@${member.user.id}> สู่ Mahanakorn Diwa!\n📌 กรุณากรอกใบสมัครที่หน้าเว็บไซต์เพื่อสมัครเป็นตำรวจ\n💡 หากสมัครแล้ว กดปุ่มด้านล่างเพื่อตรวจสอบสถานะ`)
-                        .setThumbnail(member.user.displayAvatarURL())
-                        .addFields(
-                            { name: '👤 สมาชิกใหม่', value: `<@${member.user.id}>`, inline: true },
-                            { name: '👥 สมาชิกรวม', value: `${member.guild.memberCount} คน`, inline: true }
-                        )
-                        .setFooter({ text: `${client.user?.username} • วันนี้` })
-                        .setTimestamp()
-                    ],
+                    embeds: [buildWelcomeEmbedV2(
+                        '#3aca1d',
+                        '🎉 ยินดีต้อนรับสู่ Mahanakorn Diwa!',
+                        `ยินดีต้อนรับ <@${member.user.id}> สู่ Mahanakorn Diwa!\n📌 กรุณากรอกใบสมัครที่หน้าเว็บไซต์เพื่อสมัครเป็นตำรวจ\n💡 หากสมัครแล้ว กดปุ่มด้านล่างเพื่อตรวจสอบสถานะ`,
+                        member.user.id,
+                        member.user.displayAvatarURL(),
+                        member.guild.memberCount,
+                        `${client.user?.username} • วันนี้`,
+                        true // isNewMember = true → "👤 สมาชิกใหม่"
+                    )],
                     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
                         new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
                     )]
@@ -149,10 +160,8 @@ export function setupWelcomeFeature(client: Client): void {
     client.on(Events.GuildMemberRemove, async (member) => {
         try {
             await moveMemberToOut(member.user.id);
-            const chId = configService.getWelcomeChannelId();
-            if (!chId) return;
-            const ch = member.guild.channels.cache.get(chId);
-            if (!ch || !ch.isTextBased()) return;
+            const ch = getTextChannel(member.guild, configService.getWelcomeChannelId());
+            if (!ch) return;
             await ch.send({
                 embeds: [new EmbedBuilder()
                     .setColor('#db0042')
@@ -196,7 +205,6 @@ export function setupWelcomeFeature(client: Client): void {
 
                     await i.editReply({ content: `✅ ลงทะเบียนสำเร็จ!\n📛 **ชื่อในระบบ:** ${result.nickname}` });
 
-                    // ส่ง 📝 ไป Log Channel
                     const regEmbed = buildRegEmbed(
                         userId,
                         preApproved.icName,
@@ -206,12 +214,9 @@ export function setupWelcomeFeature(client: Client): void {
                         nickChanged
                     );
 
-                    const logChId = configService.getLogChannelId();
-                    if (logChId) {
-                        const logCh = i.guild?.channels.cache.get(logChId);
-                        if (logCh?.isTextBased()) {
-                            await logCh.send({ content: `<@${userId}>`, embeds: [regEmbed] });
-                        }
+                    const logCh = getTextChannel(i.guild, configService.getLogChannelId());
+                    if (logCh) {
+                        await logCh.send({ content: `<@${userId}>`, embeds: [regEmbed] });
                     }
                 } else {
                     await i.editReply({ content: '❌ ไม่สามารถลงทะเบียนได้ (อาจซ้ำหรือข้อมูลไม่ถูกต้อง) กรุณาติดต่อ Admin' });

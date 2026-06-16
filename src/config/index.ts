@@ -19,19 +19,9 @@ export const SHEETS = {
     CONFIG_SHEET_NAME: 'config',
 };
 
-// ---- Rate Limit Defaults ----
-export const RATE_LIMITS = {
-    global: { windowMs: 60000, maxRequests: 20 },
-    logtime: { windowMs: 300000, maxRequests: 10 },
-    register: { windowMs: 60000, maxRequests: 3 },
-    edittag: { windowMs: 10000, maxRequests: 5 },
-    reload: { windowMs: 30000, maxRequests: 3 },
-};
-
 // ---- Cache TTLs ----
 export const CACHE = {
     SHEET_TTL: 5000,        // 5 seconds for sheet reads
-    MEMBER_TTL: 60000,      // 1 minute for member cache
 };
 
 // ---- Bot Config ----

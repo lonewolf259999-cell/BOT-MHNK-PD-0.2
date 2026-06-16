@@ -27,20 +27,6 @@ export class RateLimiter {
     }
 
     /**
-     * Get remaining requests and reset time for a key.
-     */
-    getStatus(key: string): { remaining: number; resetIn: number } {
-        const entry = this.store.get(key);
-        if (!entry) return { remaining: -1, resetIn: 0 };
-        const now = Date.now();
-        if (now > entry.resetAt) {
-            this.store.delete(key);
-            return { remaining: -1, resetIn: 0 };
-        }
-        return { remaining: Math.max(0, entry.count), resetIn: entry.resetAt - now };
-    }
-
-    /**
      * Reset rate limit for a specific key.
      */
     reset(key: string): void {
@@ -49,6 +35,7 @@ export class RateLimiter {
 
     /**
      * Clean up expired entries periodically.
+     * Called by setInterval in index.ts.
      */
     cleanup(): void {
         const now = Date.now();

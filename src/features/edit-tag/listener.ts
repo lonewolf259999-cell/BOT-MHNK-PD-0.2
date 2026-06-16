@@ -1,10 +1,19 @@
 import { Client, Events, ContextMenuCommandBuilder, ApplicationCommandType, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { findMembersByCode } from '../../services/member.service';
+import { checkRateLimit } from '../../services/utils';
 import { logger } from '../../core/logger';
 import { PermissionService } from '../../services/permission.service';
 import { silentCatch } from '../../services/utils';
 
-const RATE_LIMIT = new Map<string, number>();
+/**
+ * Fetch message by channelId and messageId helper.
+ * Replaces duplicate fetch logic at 4 points.
+ */
+async function fetchMsg(client: Client, channelId: string, messageId: string): Promise<any | null> {
+    const ch = await client.channels.fetch(channelId).catch(() => null);
+    if (!ch || !ch.isTextBased()) return null;
+    return (ch as any).messages.fetch(messageId).catch(() => null);
+}
 
 export function setupEditTagFeature(client: Client): void {
     client.once(Events.ClientReady, async () => {
@@ -18,9 +27,7 @@ export function setupEditTagFeature(client: Client): void {
     client.on(Events.InteractionCreate, async (i: any) => {
         try {
             if (i.isMessageContextMenuCommand && i.commandName === 'Edit Tags') {
-                const now = Date.now(), last = RATE_LIMIT.get(i.user.id) || 0;
-                if (now - last < 10000) { if (i.isRepliable()) await i.reply({ content: '⏳ กรุณารอ 10 วินาที', flags: MessageFlags.Ephemeral }).catch(silentCatch('EditTag')); return; }
-                RATE_LIMIT.set(i.user.id, now);
+                if (!checkRateLimit(`editag:${i.user.id}`, 10000, 1)) { if (i.isRepliable()) await i.reply({ content: '⏳ กรุณารอ 10 วินาที', flags: MessageFlags.Ephemeral }).catch(silentCatch('EditTag')); return; }
                 await i.deferReply({ flags: MessageFlags.Ephemeral });
                 const content = i.targetMessage.content || '';
                 const mentions = [...new Set((content.match(/<@!?(\d+)>/g) || []).map((m: string) => m.match(/\d+/)?.[0]).filter(Boolean))];
@@ -34,8 +41,8 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isModalSubmit && i.customId?.startsWith('editag_modal_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const msg = await fetchMsg(client, p[3], p[2]);
+                if (!msg) return i.editReply({ content: '❌ ไม่พบข้อความ', components: [] });
                 const codes = i.fields.getTextInputValue('input_codes').trim().split(/[\s,]+/).filter(Boolean);
                 if (!codes.length) return i.editReply({ content: '❌ ไม่พบรหัส', components: [] });
                 const { found, notFound } = findMembersByCode(i.guild, codes);
@@ -48,8 +55,8 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isStringSelectMenu && i.customId?.startsWith('editag_addsel_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const msg = await fetchMsg(client, p[3], p[2]);
+                if (!msg) return i.editReply({ content: '❌ ไม่พบข้อความ', components: [] });
                 let c = msg.content, added = 0;
                 for (const id of i.values) { if (!c.includes(`<@${id}>`) && !c.includes(`<@!${id}>`)) { c += ` <@${id}>`; added++; } }
                 await msg.edit(c); await i.editReply({ content: `✅ เพิ่ม ${added} คนสำเร็จ`, components: [] }); setTimeout(() => i.deleteReply().catch(silentCatch('EditTag')), 3000); return;
@@ -57,8 +64,8 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isButton && i.customId?.startsWith('editag_rem_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const msg = await fetchMsg(client, p[3], p[2]);
+                if (!msg) return i.editReply({ content: '❌ ไม่พบข้อความ', components: [] });
                 const ids: string[] = [...new Set((msg.content.match(/<@!?(\d+)>/g) || []).map((m: string) => m.match(/\d+/)?.[0]))].filter(Boolean) as string[];
                 const opts: { label: string; value: string }[] = [];
                 for (const id of ids) { const m = await i.guild?.members.fetch(id).catch(() => null); opts.push({ label: m ? m.displayName : id, value: id }); }
@@ -70,8 +77,8 @@ export function setupEditTagFeature(client: Client): void {
 
             if (i.isStringSelectMenu && i.customId?.startsWith('editag_remove_')) {
                 await i.deferUpdate(); const p = i.customId.split('_');
-                const ch = await client.channels.fetch(p[3]).catch(() => null); if (!ch || !ch.isTextBased()) return i.editReply({ content: '❌ ไม่พบช่อง', components: [] });
-                const msg = await (ch as any).messages.fetch(p[2]).catch(() => null); if (!msg) return i.editReply({ content: '❌ ข้อความไม่อยู่แล้ว', components: [] });
+                const msg = await fetchMsg(client, p[3], p[2]);
+                if (!msg) return i.editReply({ content: '❌ ไม่พบข้อความ', components: [] });
                 let c = msg.content; for (const id of i.values) c = c.replace(new RegExp(`<@!?${id}>`, 'g'), '');
                 c = c.replace(/\s+/g, ' ').trim(); await msg.edit(c);
                 await i.editReply({ content: `✅ ลบ ${i.values.length} คนสำเร็จ`, components: [] }); setTimeout(() => i.deleteReply().catch(silentCatch('EditTag')), 3000);

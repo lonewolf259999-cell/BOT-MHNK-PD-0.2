@@ -3,6 +3,7 @@ import http from 'http';
 import https from 'https';
 import { env, BOT, validate } from './config';
 import { configService } from './core/config.service';
+import { rateLimiter } from './core/ratelimiter';
 import { logger } from './core/logger';
 
 const errors = validate();
@@ -50,6 +51,21 @@ setInterval(() => {
     lib.get(env.renderUrl, () => { heartbeat(); }).on('error', () => {});
 }, BOT.SELF_PING_INTERVAL_MS);
 
+// Cleanup expired rate limiter entries every 5 minutes
+setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000);
+
+function gracefulShutdown(signal: string): void {
+    logger.info('SHUTDOWN', `ได้รับสัญญาณ ${signal} — กำลังปิดระบบอย่างปลอดภัย...`);
+    try {
+        const { clearAllReplyTimeouts } = require('./services/utils');
+        clearAllReplyTimeouts();
+    } catch {}
+    client.destroy().catch(() => {});
+    setTimeout(() => process.exit(0), 3000);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('unhandledRejection', (reason) => logger.error('SYSTEM', `ข้อผิดพลาดที่ไม่ถูกจัดการ: ${reason}`));
 process.on('uncaughtException', (err) => logger.error('SYSTEM', `Exception ที่ไม่ถูกจัดการ: ${err.message}`));
 
