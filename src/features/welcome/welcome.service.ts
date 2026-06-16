@@ -11,10 +11,16 @@ import { truncateNickname, makeFullName } from '../../services/member.service';
 export async function checkPreApproved(discordId: string): Promise<{ approved: boolean; icName?: string; icPhone?: string }> {
     const spreadsheetId = configService.getPendingSpreadsheetId();
     const sheetName = configService.getPendingSheetName();
-    if (!spreadsheetId || !sheetName) return { approved: false };
+    if (!spreadsheetId || !sheetName) {
+        logger.warn('Pre-Approved', `Pending config ไม่ถูกต้อง: sheetId=${spreadsheetId}, sheetName=${sheetName}`);
+        return { approved: false };
+    }
+
+    logger.debug('Pre-Approved', `ค้นหา ${discordId} ใน sheetId=${spreadsheetId} sheetName=${sheetName}`);
 
     try {
         const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!B:H`, 0);
+        logger.debug('Pre-Approved', `อ่าน Pending Sheet ได้ ${rows.length} แถว`);
         for (const row of rows) {
             const pendingDiscordId = (row[1] || '').trim(); // Column B = Discord ID
             const status = (row[7] || '').trim();           // Column H = สถานะ
