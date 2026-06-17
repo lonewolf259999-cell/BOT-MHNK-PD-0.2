@@ -22,14 +22,20 @@ export const SHEETS = {
 // ---- Cache TTLs ----
 export const CACHE = {
     SHEET_TTL: 5000,        // 5 seconds for sheet reads
+    RATE_LIMITER_CLEANUP_INTERVAL_MS: 5 * 60 * 1000, // Cleanup rate limiter every 5 min
+    COUNT_CLEANUP_INTERVAL_MS: 24 * 60 * 60 * 1000, // Cleanup message log every 24h
+    MESSAGE_LOG_MAX_SIZE: 2000, // Max entries in messageLog before pruning
 };
 
 // ---- Bot Config ----
 export const BOT = {
     MAX_RESTART_PER_DAY: 8,
+    RESTART_RESET_INTERVAL_MS: 24 * 60 * 60 * 1000, // 24 hours
     WATCHDOG_TIMEOUT_MIN: 15,
     WATCHDOG_CHECK_INTERVAL_MS: 60000,
     SELF_PING_INTERVAL_MS: 7 * 60 * 1000,
+    GRACEFUL_SHUTDOWN_TIMEOUT_MS: 3000, // Wait before force exit
+    RESTART_DELAY_MS: 15000, // Delay before restart
 };
 
 export function validate(): string[] {

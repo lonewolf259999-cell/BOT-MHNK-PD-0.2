@@ -1,6 +1,6 @@
 import { Client, Events, SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { configService } from '../../core/config.service';
-import { checkRateLimit } from '../../services/utils';
+import { rateLimiter } from '../../core/ratelimiter';
 import { logger } from '../../core/logger';
 
 export function setupReloadFeature(client: Client): void {
@@ -19,7 +19,7 @@ export function setupReloadFeature(client: Client): void {
         if (!i.isChatInputCommand || i.commandName !== 'reload') return;
         if (!i.memberPermissions?.has('Administrator')) return i.reply({ content: '❌ เฉพาะผู้ดูแลระบบเท่านั้น', flags: MessageFlags.Ephemeral });
 
-        if (!checkRateLimit(`reload:${i.user.id}`, 30000, 1)) { const s = 30; return i.reply({ content: `⏳ กรุณารอ **${s}** วินาที`, flags: MessageFlags.Ephemeral }); }
+        if (!rateLimiter.check(`reload:${i.user.id}`, 1, 30000)) { const s = 30; return i.reply({ content: `⏳ กรุณารอ **${s}** วินาที`, flags: MessageFlags.Ephemeral }); }
         await i.deferReply({ flags: MessageFlags.Ephemeral });
 
         try {

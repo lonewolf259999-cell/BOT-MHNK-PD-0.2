@@ -3,9 +3,9 @@ import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { processCountBatch } from './count.service';
 import { logger } from '../../core/logger';
+import { CACHE } from '../../config';
 
 const messageLog = new Map<string, { id: string; nickname: string; username: string }[]>();
-const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000;
 let lastCleanup = Date.now();
 
 function getTagsFromMessage(content: string, guild: any): { id: string; nickname: string; username: string }[] {
@@ -20,9 +20,9 @@ function getTagsFromMessage(content: string, guild: any): { id: string; nickname
 
 function cleanupLog(): void {
     const n = Date.now();
-    if (n - lastCleanup > CLEANUP_INTERVAL) {
-        if (messageLog.size > 2000) {
-            // ถ้าเกิน 2000 ให้ลบ oldest 50% ทิ้ง
+    if (n - lastCleanup > CACHE.COUNT_CLEANUP_INTERVAL_MS) {
+        if (messageLog.size > CACHE.MESSAGE_LOG_MAX_SIZE) {
+            // ถ้าเกิน max size ให้ลบ oldest 50% ทิ้ง
             const keys = [...messageLog.keys()].slice(0, Math.floor(messageLog.size / 2));
             for (const k of keys) messageLog.delete(k);
         } else {
@@ -64,7 +64,7 @@ export function setupCountFeature(client: Client): void {
     });
 
     // กำหนด cleanup อัตโนมัติทุก 24 ชั่วโมง
-    setInterval(cleanupLog, CLEANUP_INTERVAL);
+    setInterval(cleanupLog, CACHE.COUNT_CLEANUP_INTERVAL_MS);
     cleanupLog(); // เรียกครั้งแรกตอน start
 
     client.on(Events.MessageUpdate, async (oldM, newM: any) => {

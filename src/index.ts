@@ -1,10 +1,11 @@
 import { Client, GatewayIntentBits, Partials, Events, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import http from 'http';
 import https from 'https';
-import { env, BOT, validate } from './config';
+import { env, BOT, CACHE, validate } from './config';
 import { configService } from './core/config.service';
 import { rateLimiter } from './core/ratelimiter';
 import { logger } from './core/logger';
+import { clearAllReplyTimeouts } from './services/utils';
 
 const errors = validate();
 if (errors.length > 0) {
@@ -17,11 +18,11 @@ let restartCount = 0;
 let firstCrash = Date.now();
 function safeRestart(reason: string): void {
     const now = Date.now();
-    if (now - firstCrash > 24 * 60 * 60 * 1000) { restartCount = 0; firstCrash = now; }
+    if (now - firstCrash > BOT.RESTART_RESET_INTERVAL_MS) { restartCount = 0; firstCrash = now; }
     restartCount++;
     if (restartCount > BOT.MAX_RESTART_PER_DAY) { logger.error('SYSTEM', 'ถึงขีดจำกัดการรีสตาร์ทแล้ว'); return; }
     logger.warn('SYSTEM', `กำลังรีสตาร์ท (${restartCount}/${BOT.MAX_RESTART_PER_DAY}) | ${reason}`);
-    setTimeout(() => process.exit(1), 15000);
+    setTimeout(() => process.exit(1), BOT.RESTART_DELAY_MS);
 }
 
 let lastAlive = Date.now();
@@ -51,17 +52,16 @@ setInterval(() => {
     lib.get(env.renderUrl, () => { heartbeat(); }).on('error', () => {});
 }, BOT.SELF_PING_INTERVAL_MS);
 
-// Cleanup expired rate limiter entries every 5 minutes
-setInterval(() => rateLimiter.cleanup(), 5 * 60 * 1000);
+// Cleanup expired rate limiter entries
+setInterval(() => rateLimiter.cleanup(), CACHE.RATE_LIMITER_CLEANUP_INTERVAL_MS);
 
 function gracefulShutdown(signal: string): void {
     logger.info('SHUTDOWN', `ได้รับสัญญาณ ${signal} — กำลังปิดระบบอย่างปลอดภัย...`);
     try {
-        const { clearAllReplyTimeouts } = require('./services/utils');
         clearAllReplyTimeouts();
     } catch {}
     client.destroy().catch(() => {});
-    setTimeout(() => process.exit(0), 3000);
+    setTimeout(() => process.exit(0), BOT.GRACEFUL_SHUTDOWN_TIMEOUT_MS);
 }
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
@@ -80,7 +80,7 @@ client.once(Events.ClientReady, async () => {
     heartbeat();
     logger.info('CLIENT', `${client.user?.tag} ออนไลน์พร้อมทำงาน!`);
 
-    // ✅ ลงทะเบียน Slash Commands ทั้งหมดที่เดียว
+    // ✅ ลงทะเบียน Slash Commands ทั้งหมดด้วย Bulk Registration
     const commandDefs = [
         { name: '30day', description: '⏳ ตรวจสอบและจัดการสมาชิกครบ 30 วัน', permissions: 0 },
         { name: 'editpd', description: '📝 แก้ไขโปรไฟล์ตำรวจ (ชื่อ IC, เบอร์โทร, อายุ)' },
@@ -88,23 +88,20 @@ client.once(Events.ClientReady, async () => {
         { name: 'de', description: 'ลบข้อความล่าสุดในแชนแนลนี้ (สูงสุด 500)', permissions: PermissionFlagsBits.ManageMessages },
     ];
 
-    for (const def of commandDefs) {
-        try {
-            const cmd = new SlashCommandBuilder().setName(def.name).setDescription(def.description);
-            if (def.name === 'de') {
-                cmd.addIntegerOption(opt => opt.setName('amount').setDescription('จำนวนข้อความที่ต้องการลบ (1-500)').setRequired(true).setMinValue(1).setMaxValue(500));
-            }
-            if (def.permissions !== undefined) cmd.setDefaultMemberPermissions(def.permissions);
-
-            const existing = await client.application?.commands.fetch();
-            const old = existing?.find(c => c.name === def.name);
-            if (old) await client.application?.commands.edit(old.id, cmd);
-            else await client.application?.commands.create(cmd);
-
-            logger.info('COMMAND', `ลงทะเบียน /${def.name} สำเร็จ`);
-        } catch (err) {
-            logger.error('COMMAND', `ลงทะเบียน /${def.name} ล้มเหลว: ${err}`);
+    const commands = commandDefs.map(def => {
+        const cmd = new SlashCommandBuilder().setName(def.name).setDescription(def.description);
+        if (def.name === 'de') {
+            cmd.addIntegerOption(opt => opt.setName('amount').setDescription('จำนวนข้อความที่ต้องการลบ (1-500)').setRequired(true).setMinValue(1).setMaxValue(500));
         }
+        if (def.permissions !== undefined) cmd.setDefaultMemberPermissions(def.permissions);
+        return cmd.toJSON();
+    });
+
+    try {
+        await client.application?.commands.set(commands);
+        logger.info('COMMAND', `ลงทะเบียน ${commands.length} คำสั่งสำเร็จ (Bulk)`);
+    } catch (err) {
+        logger.error('COMMAND', `ลงทะเบียนคำสั่งล้มเหลว: ${err}`);
     }
 });
 
@@ -115,35 +112,28 @@ async function start(): Promise<void> {
         logger.error('STARTUP', 'โหลด config ไม่สำเร็จ — บอทอาจทำงานไม่ครบ');
     }
 
-    const { setupWelcomeFeature } = await import('./features/welcome/listener');
-    setupWelcomeFeature(client);
+    // ✅ Feature Registry — โหลดฟีเจอร์ทั้งหมด
+    const featureSetups: ((client: Client) => void)[] = [
+        (await import('./features/welcome/listener')).setupWelcomeFeature,
+        (await import('./features/logtime/listener')).setupLogtimeFeature,
+        (await import('./features/bypd/listener')).setupBypdFeature,
+        (await import('./features/reload/listener')).setupReloadFeature,
+        (await import('./features/count/listener')).setupCountFeature,
+        (await import('./features/edit-tag/listener')).setupEditTagFeature,
+        (await import('./features/thirtyday/listener')).setupThirtyDayFeature,
+        (await import('./features/editpd/listener')).setupEditPdFeature,
+        (await import('./features/recount/listener')).setupRecountFeature,
+        (await import('./features/clear/listener')).setupClearFeature,
+    ];
 
-    const { setupLogtimeFeature } = await import('./features/logtime/listener');
-    setupLogtimeFeature(client);
-
-    const { setupBypdFeature } = await import('./features/bypd/listener');
-    setupBypdFeature(client);
-
-    const { setupReloadFeature } = await import('./features/reload/listener');
-    setupReloadFeature(client);
-
-    const { setupCountFeature } = await import('./features/count/listener');
-    setupCountFeature(client);
-
-    const { setupEditTagFeature } = await import('./features/edit-tag/listener');
-    setupEditTagFeature(client);
-
-    const { setupThirtyDayFeature } = await import('./features/thirtyday/listener');
-    setupThirtyDayFeature(client);
-
-    const { setupEditPdFeature } = await import('./features/editpd/listener');
-    setupEditPdFeature(client);
-
-    const { setupRecountFeature } = await import('./features/recount/listener');
-    setupRecountFeature(client);
-
-    const { setupClearFeature } = await import('./features/clear/listener');
-    setupClearFeature(client);
+    for (const setupFn of featureSetups) {
+        try {
+            setupFn(client);
+            logger.debug('FEATURE', 'โหลดฟีเจอร์สำเร็จ');
+        } catch (err) {
+            logger.error('FEATURE', `โหลดฟีเจอร์ล้มเหลว: ${err}`);
+        }
+    }
 
     await client.login(env.botToken);
 }

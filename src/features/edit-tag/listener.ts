@@ -1,6 +1,6 @@
 import { Client, Events, ContextMenuCommandBuilder, ApplicationCommandType, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { findMembersByCode } from '../../services/member.service';
-import { checkRateLimit } from '../../services/utils';
+import { rateLimiter } from '../../core/ratelimiter';
 import { logger } from '../../core/logger';
 import { PermissionService } from '../../services/permission.service';
 import { silentCatch } from '../../services/utils';
@@ -27,7 +27,7 @@ export function setupEditTagFeature(client: Client): void {
     client.on(Events.InteractionCreate, async (i: any) => {
         try {
             if (i.isMessageContextMenuCommand && i.commandName === 'Edit Tags') {
-                if (!checkRateLimit(`editag:${i.user.id}`, 10000, 1)) { if (i.isRepliable()) await i.reply({ content: '⏳ กรุณารอ 10 วินาที', flags: MessageFlags.Ephemeral }).catch(silentCatch('EditTag')); return; }
+                if (!rateLimiter.check(`editag:${i.user.id}`, 1, 10000)) { if (i.isRepliable()) await i.reply({ content: '⏳ กรุณารอ 10 วินาที', flags: MessageFlags.Ephemeral }).catch(silentCatch('EditTag')); return; }
                 await i.deferReply({ flags: MessageFlags.Ephemeral });
                 const content = i.targetMessage.content || '';
                 const mentions = [...new Set((content.match(/<@!?(\d+)>/g) || []).map((m: string) => m.match(/\d+/)?.[0]).filter(Boolean))];

@@ -51,35 +51,6 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Centralized rate limit helper.
- * Replaces duplicate Map + logic in each feature.
- */
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-/**
- * Check if action is rate limited.
- * @returns true if allowed, false if rate limited
- */
-export function checkRateLimit(key: string, windowMs: number, limit: number): boolean {
-    const now = Date.now();
-    const entry = rateLimitMap.get(key);
-    if (!entry || now > entry.resetAt) {
-        rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
-        return true;
-    }
-    if (entry.count >= limit) return false;
-    entry.count++;
-    return true;
-}
-
-/**
- * Clear rate limit for a key (e.g. on success).
- */
-export function clearRateLimit(key: string): void {
-    rateLimitMap.delete(key);
-}
-
-/**
  * Get text channel from guild cache, returns null if not found or not text-based.
  */
 export function getTextChannel(guild: any, channelId: string): any | null {
