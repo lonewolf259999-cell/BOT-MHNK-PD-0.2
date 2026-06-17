@@ -1,19 +1,11 @@
-import { Client, Events, SlashCommandBuilder, MessageFlags } from 'discord.js';
+import { Client, Events, MessageFlags } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { rateLimiter } from '../../core/ratelimiter';
 import { logger } from '../../core/logger';
 
 export function setupReloadFeature(client: Client): void {
-    client.once(Events.ClientReady, async () => {
-        const cmd = new SlashCommandBuilder().setName('reload').setDescription('🔄 รีโหลด config จาก Google Sheet').setDefaultMemberPermissions(0);
-        try {
-            const existing = await client.application?.commands.fetch();
-            const old = existing?.find(c => c.name === 'reload');
-            if (old) await client.application?.commands.edit(old.id, cmd);
-            else await client.application?.commands.create(cmd);
-            logger.info('รีโหลด', 'ลงทะเบียนคำสั่ง /reload สำเร็จ');
-        } catch (e) { logger.error('รีโหลด', `ลงทะเบียนล้มเหลว: ${e}`); }
-    });
+    // คำสั่ง /reload ถูกลงทะเบียนผ่าน Bulk Registration ที่ index.ts แล้ว
+    // ที่นี่จัดการเฉพาะ Interaction (การทำงานเมื่อผู้ใช้ใช้งานคำสั่ง)
 
     client.on(Events.InteractionCreate, async (i: any) => {
         if (!i.isChatInputCommand || i.commandName !== 'reload') return;

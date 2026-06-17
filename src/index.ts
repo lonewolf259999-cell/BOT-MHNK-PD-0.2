@@ -85,6 +85,7 @@ client.once(Events.ClientReady, async () => {
         { name: '30day', description: '⏳ ตรวจสอบและจัดการสมาชิกครบ 30 วัน', permissions: 0 },
         { name: 'editpd', description: '📝 แก้ไขโปรไฟล์ตำรวจ (ชื่อ IC, เบอร์โทร, อายุ)' },
         { name: 'recount', description: '⚙️ แผงควบคุมตั้งค่าและนับยอดเคส' },
+        { name: 'reload', description: '🔄 รีโหลด config จาก Google Sheet', permissions: 0 },
         { name: 'de', description: 'ลบข้อความล่าสุดในแชนแนลนี้ (สูงสุด 500)', permissions: PermissionFlagsBits.ManageMessages },
     ];
 
