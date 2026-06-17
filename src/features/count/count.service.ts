@@ -4,29 +4,44 @@ import { normalizeName, replyAndDelete, silentCatch } from '../../services/utils
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 
+/*
+ * IMPORTANT: Actual Sheet Structure
+ *   Row 1: (empty)
+ *   Row 2: (empty)
+ *   Row 3: Header row (A="ชื่อDC", B="User ID", C-G=count columns)
+ *   Row 4+: Data (A=display name, B=Discord User ID, C=Take2, D=คดีปกติ, E=รถยอด, F=คุมสอบ, G=อุ้มเอ๋อ)
+ * 
+ * Column indices: A=0, B=1, C=2, D=3, E=4, F=5, G=6
+ * Data starts at row index 3 (0-based)
+ */
+const DATA_START_ROW = 3; // Row 4 in sheet (0-based index 3)
+
 /**
- * Find row index by exact Discord User ID match in Column A.
+ * Find row index by exact Discord User ID match in Column B (index 1).
+ * Only searches data rows (index 3+).
  */
 function findRowById(rows: string[][], userId: string): number {
-    for (let i = 1; i < rows.length; i++) {
-        if (rows[i]?.[0] === userId) return i;
+    for (let i = DATA_START_ROW; i < rows.length; i++) {
+        if (rows[i]?.length > 1 && rows[i][1] === userId) return i;
     }
     return -1;
 }
 
 /**
- * Backward-compatible fallback: find row by name/nickname match.
- * This handles existing sheets that still have names in Column A instead of User IDs.
- * Uses the same `.includes()` logic as the original code for compatibility.
+ * Backward-compatible fallback: find row by name/nickname match in Column A (index 0).
+ * For existing rows that may not have User ID in Column B yet.
+ * Only searches data rows (index 3+).
  */
 function findRowByName(rows: string[][], tag: { id: string; nickname: string; username: string }): number {
     const n = normalizeName(tag.nickname);
     const u = normalizeName(tag.username);
-    for (let i = 1; i < rows.length; i++) {
-        const cell = rows[i]?.[0];
-        if (cell) {
-            const cellLower = normalizeName(cell);
-            if (cellLower.includes(n) || cellLower.includes(u) || normalizeName(rows[i]?.[1] || '') === u) {
+    for (let i = DATA_START_ROW; i < rows.length; i++) {
+        const nameCell = rows[i]?.[0]; // Column A = display name
+        const idCell = rows[i]?.[1];   // Column B = User ID (may be empty in old data)
+        if (nameCell) {
+            const nameLower = normalizeName(nameCell);
+            // Match by display name OR by username in Column B
+            if (nameLower.includes(n) || nameLower.includes(u) || normalizeName(idCell || '') === u) {
                 return i;
             }
         }
@@ -38,24 +53,26 @@ function findRowByName(rows: string[][], tag: { id: string; nickname: string; us
  * Ensure a row exists for the user, creating one if not found.
  * Returns the row index.
  * 
- * Priority: 1) Exact User ID match 2) Backward-compatible name match 3) Create new row
- * When found by name, automatically migrates the row to use User ID in Column A.
+ * Priority: 1) Exact User ID match in Column B  2) Name match in Column A  3) Create new row
+ * When found by name, automatically sets User ID in Column B.
+ * 
+ * Sheet format: [A=displayName, B=UserID, C=Take2, D=คดีปกติ, E=รถยอด, F=คุมสอบ, G=อุ้มเอ๋อ]
  */
 function ensureUserRow(rows: string[][], tag: { id: string; nickname: string; username: string }): number {
-    // Priority 1: Exact User ID match (new format)
+    // Priority 1: Exact User ID match in Column B
     let idx = findRowById(rows, tag.id);
     if (idx !== -1) return idx;
 
-    // Priority 2: Backward-compatible name match (old format)
+    // Priority 2: Backward-compatible name match in Column A
     idx = findRowByName(rows, tag);
     if (idx !== -1) {
-        // Migrate: replace name with User ID so all future lookups use exact ID
-        rows[idx][0] = tag.id;
+        // Migrate: set User ID in Column B for future exact lookups
+        rows[idx][1] = tag.id;
         return idx;
     }
 
-    // Priority 3: Create new row with User ID as key
-    rows.push([tag.id, tag.nickname || tag.username, '0', '0', '0', '0', '0']);
+    // Priority 3: Create new row [displayName, UserID, 0,0,0,0,0]
+    rows.push([tag.nickname || tag.username, tag.id, '0', '0', '0', '0', '0']);
     return rows.length - 1;
 }
 
@@ -68,7 +85,7 @@ export async function processCountBatch(
         const cfg = configService.getCountConfig();
         if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) return;
 
-        // Map channel to column index
+        // Map channel to column index (C=2, D=3, E=4, F=5, G=6)
         const chMap: Record<string, number> = {
             [cfg.CHANNELS.CHANNEL_1]: 2,
             [cfg.CHANNELS.CHANNEL_2]: 3,
@@ -86,13 +103,18 @@ export async function processCountBatch(
             0
         );
 
-        // If sheet is empty, initialize header row
-        if (rows.length === 0) {
-            rows.push(['User ID', 'ชื่อเล่น', 'Take2', 'คดีปกติ', 'รถยอด', 'คุมสอบ', 'อุ้มเอ๋อ']);
+        // If sheet is too short, ensure it has at least DATA_START_ROW rows
+        while (rows.length < DATA_START_ROW) {
+            rows.push([]);
+        }
+
+        // Ensure header row exists at row index 3 (0-based)
+        if (rows[DATA_START_ROW - 1]?.length < 7 || !rows[DATA_START_ROW - 1]?.[0]) {
+            rows[DATA_START_ROW - 1] = ['ชื่อDC', 'User ID', 'Take2', 'คดีปกติ', 'รถยอด', 'คุมสอบ', 'อุ้มเอ๋อ'];
         }
 
         for (const p of tags) {
-            // Find or create row by exact User ID match
+            // Find or create row by exact User ID in Column B
             const rowIdx = ensureUserRow(rows, p);
 
             // Update count for the specific column
@@ -100,7 +122,7 @@ export async function processCountBatch(
             rows[rowIdx][colIdx] = Math.max(0, currentVal + (isDelete ? -1 : 1)).toString();
         }
 
-        // Write updated data back to sheet
+        // Write updated data back to sheet (start from A1 to preserve empty rows 1-2)
         await sheetService.updateValues(
             cfg.SPREADSHEET_ID,
             `${cfg.SHEET_NAME}!A1`,
@@ -131,12 +153,22 @@ export async function manualRecount(client: any, interaction: any): Promise<void
             0
         );
 
-        // Reset all count columns (C-G, indices 2-6) for existing data rows
-        for (let i = 1; i < rows.length; i++) {
+        // Ensure sheet has minimum structure
+        while (rows.length < DATA_START_ROW) {
+            rows.push([]);
+        }
+
+        // Ensure header row exists at row index 3 (0-based)
+        if (rows[DATA_START_ROW - 1]?.length < 7 || !rows[DATA_START_ROW - 1]?.[0]) {
+            rows[DATA_START_ROW - 1] = ['ชื่อDC', 'User ID', 'Take2', 'คดีปกติ', 'รถยอด', 'คุมสอบ', 'อุ้มเอ๋อ'];
+        }
+
+        // Reset all count columns (C-G, indices 2-6) for existing data rows only (index 3+)
+        for (let i = DATA_START_ROW; i < rows.length; i++) {
             if (rows[i]) {
-                // Ensure row has enough columns
+                // Ensure row has enough columns (at least 7: A-G)
                 while (rows[i].length < 7) rows[i].push('0');
-                // Reset count columns to 0
+                // Reset count columns C-G to 0
                 for (let c = 2; c <= 6; c++) {
                     rows[i][c] = '0';
                 }
@@ -199,7 +231,7 @@ export async function manualRecount(client: any, interaction: any): Promise<void
                         const person = userCache.get(uid);
                         if (!person) continue;
 
-                        // Find or create row by exact User ID
+                        // Find or create row by exact User ID in Column B
                         const rowIdx = ensureUserRow(rows, person);
 
                         // Increment count for this channel
@@ -214,7 +246,7 @@ export async function manualRecount(client: any, interaction: any): Promise<void
             }
         }
 
-        // Write all data back to sheet
+        // Write all data back to sheet (start from A1 to preserve empty rows 1-2)
         await sheetService.updateValues(
             cfg.SPREADSHEET_ID,
             `${cfg.SHEET_NAME}!A1`,
