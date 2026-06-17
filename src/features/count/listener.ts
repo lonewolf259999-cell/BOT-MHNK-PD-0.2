@@ -71,12 +71,32 @@ export function setupCountFeature(client: Client): void {
         try {
             const cfg = configService.getCountConfig();
             if (!configService.isLoaded() || !cfg.CHANNELS || !newM.guild || !newM.channel) return;
+            
+            // Get old tags from messageLog cache
             const oldTags = messageLog.get(newM.id) || [];
+            
+            // Get new tags from updated message content
             const newTags = getTagsFromMessage(newM.content || '', newM.guild);
-            const oldIds = oldTags.map(x => x.username), newIds = newTags.map(x => x.username);
-            const added = newTags.filter(x => !oldIds.includes(x.username)), removed = oldTags.filter(x => !newIds.includes(x.username));
-            if (added.length > 0) await processCountBatch(added, newM.channel.id, false);
-            if (removed.length > 0) await processCountBatch(removed, newM.channel.id, true);
+            
+            // Compare by Discord User ID (not username!) to avoid false matches
+            const oldIds = new Set(oldTags.map(x => x.id));
+            const newIds = new Set(newTags.map(x => x.id));
+            
+            // Added = in newTags but not in oldTags
+            const added = newTags.filter(x => !oldIds.has(x.id));
+            // Removed = in oldTags but not in newTags
+            const removed = oldTags.filter(x => !newIds.has(x.id));
+            
+            // Process additions first, then removals
+            // Each call is internally locked by Mutex, so they will run sequentially
+            if (added.length > 0) {
+                await processCountBatch(added, newM.channel.id, false);
+            }
+            if (removed.length > 0) {
+                await processCountBatch(removed, newM.channel.id, true);
+            }
+            
+            // Update cache with new tags
             messageLog.set(newM.id, newTags);
         } catch (e) { logger.error('นับเคส', `MessageUpdate: ${e}`); }
     });
