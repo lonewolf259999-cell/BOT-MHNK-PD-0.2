@@ -1,10 +1,10 @@
-import { Client, Events } from 'discord.js';
+import { Client, Events, Message } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { processLogtime } from './logtime.service';
 import { logger } from '../../core/logger';
 
 export function setupLogtimeFeature(client: Client): void {
-    client.on(Events.MessageCreate, async (message) => {
+    client.on(Events.MessageCreate, async (message: Message) => {
         try {
             const chId = configService.getLogtimeChannelId();
             if (!chId || message.channel.id !== chId || !configService.isLoaded()) return;
@@ -20,17 +20,41 @@ export function setupLogtimeFeature(client: Client): void {
                 inTime: info.inTime || undefined,
                 duration: info.duration || undefined,
             });
-        } catch (e) { logger.error('ลงเวลา', `ผิดพลาด: ${e}`); }
+        } catch (e: unknown) {
+            logger.error('ลงเวลา', `ผิดพลาด: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 }
 
-function buildMessageText(msg: any): string {
+function buildMessageText(msg: Message): string {
     const lines: string[] = [];
     if (msg.content) lines.push(msg.content);
-    if (msg.embeds) msg.embeds.forEach((e: any) => { lines.push(e.title, e.description); e.fields?.forEach((f: any) => lines.push(f.name, f.value)); });
+    if (msg.embeds) {
+        msg.embeds.forEach((e) => {
+            if (e.title) lines.push(e.title);
+            if (e.description) lines.push(e.description);
+            if (e.fields) {
+                e.fields.forEach((f) => {
+                    lines.push(f.name);
+                    lines.push(f.value);
+                });
+            }
+        });
+    }
     return lines.filter(Boolean).join('\n');
 }
-function extractInfo(text: string) {
+
+interface LogtimeInfo {
+    name: string | null;
+    inDate: string | null;
+    inTime: string | null;
+    date: string | null;
+    time: string | null;
+    duration: string | null;
+    id: string | null;
+}
+
+function extractInfo(text: string): LogtimeInfo {
     const c = text.replace(/`/g, '').replace(/\*/g, '').replace(/\u200B/g, '');
     const name = (c.match(/รายงานเข้าเวรของ\s*[-–—]\s*(.+)/i) || [])[1]?.trim() || null;
     const inMatch = c.match(/เวลาเข้างาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i);

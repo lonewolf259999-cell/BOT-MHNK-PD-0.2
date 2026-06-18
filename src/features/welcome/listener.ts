@@ -1,4 +1,4 @@
-import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, type ColorResolvable } from 'discord.js';
+import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, type ColorResolvable, Interaction, ButtonInteraction } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { sheetService } from '../../core/sheet.service';
 import { registerMember, moveMemberToOut, checkPreApproved, checkInOutDc, isAlreadyRegistered } from './welcome.service';
@@ -27,14 +27,6 @@ function buildRegEmbed(userId: string, icName: string, icPhone: string, ocAge: s
 
 /**
  * สร้าง embed ต้อนรับแบบทั่วไป (ใช้แทนการสร้าง EmbedBuilder ซ้ำ 3 แบบ)
- * @param color - สี embed
- * @param title - หัวข้อ
- * @param description - คำอธิบาย
- * @param userId - Discord ID
- * @param avatar - URL รูปผู้ใช้
- * @param memberCount - จำนวนสมาชิก
- * @param footer - ข้อความ footer
- * @param isNewMember - true = field name "👤 สมาชิกใหม่" / false = "👤 สมาชิก"
  */
 function buildWelcomeEmbedV2(color: ColorResolvable, title: string, description: string, userId: string, avatar: string, memberCount: number, footer: string, isNewMember = false) {
     return new EmbedBuilder()
@@ -135,7 +127,7 @@ export function setupWelcomeFeature(client: Client): void {
                         member.user.displayAvatarURL(),
                         member.guild.memberCount,
                         `${client.user?.username} • วันนี้`,
-                        true // isNewMember = true → "👤 สมาชิกใหม่"
+                        true
                     )],
                     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
                         new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
@@ -144,7 +136,9 @@ export function setupWelcomeFeature(client: Client): void {
             }
 
             logger.info('ต้อนรับ', `ส่งข้อความต้อนรับให้ ${member.user.tag} (preApproved=${preApproved.approved})`);
-        } catch (e) { logger.error('ต้อนรับ', `GuildMemberAdd error: ${e}`); }
+        } catch (e: unknown) {
+            logger.error('ต้อนรับ', `GuildMemberAdd error: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 
     client.on(Events.GuildMemberRemove, async (member) => {
@@ -167,33 +161,36 @@ export function setupWelcomeFeature(client: Client): void {
                 ]
             });
             logger.info('ต้อนรับ', `ส่งข้อความออกให้ ${member.user.tag}`);
-        } catch (e) { logger.error('ต้อนรับ', `GuildMemberRemove error: ${e}`); }
+        } catch (e: unknown) {
+            logger.error('ต้อนรับ', `GuildMemberRemove error: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 
     // ✅ ปุ่มตรวจสอบสถานะ
-    client.on(Events.InteractionCreate, async (i: any) => {
+    client.on(Events.InteractionCreate, async (i: Interaction) => {
         try {
-            if (!i.isButton || i.customId !== 'btn_check_status') return;
-            await i.deferReply({ flags: MessageFlags.Ephemeral });
+            if (!i.isButton() || i.customId !== 'btn_check_status') return;
+            const btn = i as ButtonInteraction<'cached'>;
+            await btn.deferReply({ flags: MessageFlags.Ephemeral });
 
-            const userId = i.user.id;
-            const member = i.guild?.members.cache.get(userId);
+            const userId = btn.user.id;
+            const member = btn.guild?.members.cache.get(userId);
 
             const isOutDc = await checkInOutDc(userId);
             if (isOutDc) {
-                await i.editReply({ content: 'ℹ️ คุณมีชื่อในระบบที่ถูกถอดออกแล้ว กรุณาติดต่อ Admin หากต้องการกลับเข้ามาทำงาน' });
+                await btn.editReply({ content: 'ℹ️ คุณมีชื่อในระบบที่ถูกถอดออกแล้ว กรุณาติดต่อ Admin หากต้องการกลับเข้ามาทำงาน' });
                 return;
             }
 
             const preApproved = await checkPreApproved(userId);
             if (preApproved.approved && preApproved.icName) {
-                await i.editReply({ content: '✅ พบการอนุมัติ! กำลังลงทะเบียนให้...' });
+                await btn.editReply({ content: '✅ พบการอนุมัติ! กำลังลงทะเบียนให้...' });
                 const result = await registerMember(preApproved.icName, userId);
                 if (result) {
                     let nickChanged = true;
                     if (member) { try { await member.setNickname(result.nickname); } catch { nickChanged = false; } }
 
-                    await i.editReply({ content: `✅ ลงทะเบียนสำเร็จ!\n📛 **ชื่อในระบบ:** ${result.nickname}` });
+                    await btn.editReply({ content: `✅ ลงทะเบียนสำเร็จ!\n📛 **ชื่อในระบบ:** ${result.nickname}` });
 
                     const regEmbed = buildRegEmbed(
                         userId,
@@ -204,30 +201,32 @@ export function setupWelcomeFeature(client: Client): void {
                         nickChanged
                     );
 
-                    const logCh = getTextChannel(i.guild, configService.getLogChannelId());
+                    const logCh = getTextChannel(btn.guild, configService.getLogChannelId());
                     if (logCh) {
                         await logCh.send({ content: `<@${userId}>`, embeds: [regEmbed] });
                     }
                 } else {
-                    await i.editReply({ content: '❌ ไม่สามารถลงทะเบียนได้ (อาจซ้ำหรือข้อมูลไม่ถูกต้อง) กรุณาติดต่อ Admin' });
+                    await btn.editReply({ content: '❌ ไม่สามารถลงทะเบียนได้ (อาจซ้ำหรือข้อมูลไม่ถูกต้อง) กรุณาติดต่อ Admin' });
                 }
                 return;
             }
 
             const pendingInfo = await checkPendingStatus(userId);
             if (pendingInfo.found) {
-                await i.editReply({ content: `📋 ใบสมัครของคุณ **${pendingInfo.status}** อยู่ในระบบแล้ว\n${pendingInfo.status === 'รอตรวจ' ? '⏳ กรุณารอ Admin ตรวจสอบ' : ''}` });
+                await btn.editReply({ content: `📋 ใบสมัครของคุณ **${pendingInfo.status}** อยู่ในระบบแล้ว\n${pendingInfo.status === 'รอตรวจ' ? '⏳ กรุณารอ Admin ตรวจสอบ' : ''}` });
                 return;
             }
 
             const alreadyReg = await isAlreadyRegistered(userId);
             if (alreadyReg) {
-                await i.editReply({ content: '✅ คุณมีชื่อในระบบตำรวจอยู่แล้ว ไม่ต้องสมัครซ้ำ' });
+                await btn.editReply({ content: '✅ คุณมีชื่อในระบบตำรวจอยู่แล้ว ไม่ต้องสมัครซ้ำ' });
                 return;
             }
 
-            await i.editReply({ content: '📝 ยังไม่พบข้อมูลของคุณ กรุณากรอกใบสมัครที่หน้าเว็บไซต์ https://mhnk-pd-0-1.onrender.com/register' });
-        } catch (e) { logger.error('ต้อนรับ', `Check status button error: ${e}`); }
+            await btn.editReply({ content: '📝 ยังไม่พบข้อมูลของคุณ กรุณากรอกใบสมัครที่หน้าเว็บไซต์ https://mhnk-pd-0-1.onrender.com/register' });
+        } catch (e: unknown) {
+            logger.error('ต้อนรับ', `Check status button error: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 }
 

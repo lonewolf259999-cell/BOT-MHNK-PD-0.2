@@ -1,19 +1,27 @@
-import { Client, Events } from 'discord.js';
+import { Client, Events, Message, Guild, GuildMember, MessageFlags } from 'discord.js';
 import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { processCountBatch } from './count.service';
 import { logger } from '../../core/logger';
 import { CACHE } from '../../config';
+import type { TagInfo } from '../../types/discord';
 
-const messageLog = new Map<string, { id: string; nickname: string; username: string }[]>();
+const messageLog = new Map<string, TagInfo[]>();
 let lastCleanup = Date.now();
 
-function getTagsFromMessage(content: string, guild: any): { id: string; nickname: string; username: string }[] {
-    const tags: { id: string; nickname: string; username: string }[] = [];
-    const regex = /<@!?(\d+)>/g; let m: RegExpExecArray | null;
+function getTagsFromMessage(content: string, guild: Guild): TagInfo[] {
+    const tags: TagInfo[] = [];
+    const regex = /<@!?(\d+)>/g;
+    let m: RegExpExecArray | null;
     while ((m = regex.exec(content)) !== null) {
         const member = guild.members.cache.get(m[1]);
-        if (member && !tags.some(t => t.id === member.id)) tags.push({ id: member.id, nickname: (member.nickname || member.displayName || member.user.username).trim(), username: member.user.username });
+        if (member && !tags.some(t => t.id === member.id)) {
+            tags.push({
+                id: member.id,
+                nickname: (member.nickname || member.displayName || member.user.username).trim(),
+                username: member.user.username,
+            });
+        }
     }
     return tags;
 }
@@ -34,7 +42,12 @@ function cleanupLog(): void {
 
 export function setupCountFeature(client: Client): void {
     client.once(Events.ClientReady, async () => {
-        try { for (const g of client.guilds.cache.values()) await g.members.fetch(); logger.info('นับเคส', 'แคชสมาชิกเรียบร้อย'); } catch (e) { logger.error('นับเคส', `แคชผิดพลาด: ${e}`); }
+        try {
+            for (const g of client.guilds.cache.values()) await g.members.fetch();
+            logger.info('นับเคส', 'แคชสมาชิกเรียบร้อย');
+        } catch (e: unknown) {
+            logger.error('นับเคส', `แคชผิดพลาด: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 
     client.on(Events.MessageCreate, async (message) => {
@@ -49,7 +62,9 @@ export function setupCountFeature(client: Client): void {
             if (messageLog.has(message.id)) return;
             messageLog.set(message.id, tags);
             await processCountBatch(tags, message.channel.id, false);
-        } catch (e) { logger.error('นับเคส', `MessageCreate: ${e}`); }
+        } catch (e: unknown) {
+            logger.error('นับเคส', `MessageCreate: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 
     client.on(Events.MessageDelete, async (message) => {
@@ -58,46 +73,42 @@ export function setupCountFeature(client: Client): void {
             if (!configService.isLoaded() || !cfg.CHANNELS) return;
             const tags = messageLog.get(message.id);
             if (!tags) return;
-            messageLog.delete(message.id); cleanupLog();
+            messageLog.delete(message.id);
+            cleanupLog();
             await processCountBatch(tags, message.channel.id, true);
-        } catch (e) { logger.error('นับเคส', `MessageDelete: ${e}`); }
+        } catch (e: unknown) {
+            logger.error('นับเคส', `MessageDelete: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 
     // กำหนด cleanup อัตโนมัติทุก 24 ชั่วโมง
     setInterval(cleanupLog, CACHE.COUNT_CLEANUP_INTERVAL_MS);
     cleanupLog(); // เรียกครั้งแรกตอน start
 
-    client.on(Events.MessageUpdate, async (oldM, newM: any) => {
+    client.on(Events.MessageUpdate, async (oldM, newM) => {
         try {
             const cfg = configService.getCountConfig();
             if (!configService.isLoaded() || !cfg.CHANNELS || !newM.guild || !newM.channel) return;
-            
-            // Get old tags from messageLog cache
+
             const oldTags = messageLog.get(newM.id) || [];
-            
-            // Get new tags from updated message content
             const newTags = getTagsFromMessage(newM.content || '', newM.guild);
-            
-            // Compare by Discord User ID (not username!) to avoid false matches
+
             const oldIds = new Set(oldTags.map(x => x.id));
             const newIds = new Set(newTags.map(x => x.id));
-            
-            // Added = in newTags but not in oldTags
+
             const added = newTags.filter(x => !oldIds.has(x.id));
-            // Removed = in oldTags but not in newTags
             const removed = oldTags.filter(x => !newIds.has(x.id));
-            
-            // Process additions first, then removals
-            // Each call is internally locked by Mutex, so they will run sequentially
+
             if (added.length > 0) {
                 await processCountBatch(added, newM.channel.id, false);
             }
             if (removed.length > 0) {
                 await processCountBatch(removed, newM.channel.id, true);
             }
-            
-            // Update cache with new tags
+
             messageLog.set(newM.id, newTags);
-        } catch (e) { logger.error('นับเคส', `MessageUpdate: ${e}`); }
+        } catch (e: unknown) {
+            logger.error('นับเคส', `MessageUpdate: ${e instanceof Error ? e.message : String(e)}`);
+        }
     });
 }

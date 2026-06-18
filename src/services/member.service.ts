@@ -1,10 +1,5 @@
 import { Guild, GuildMember } from 'discord.js';
 
-export function findMemberByCode(guild: Guild, code: string): GuildMember | undefined {
-    const prefix = `${code} [MHNK-PD]`;
-    return guild.members.cache.find(m => (m.nickname || '').startsWith(prefix));
-}
-
 export function findMembersByCode(guild: Guild, codes: string[]): { found: GuildMember[]; notFound: string[] } {
     const found: GuildMember[] = [];
     const notFound: string[] = [];

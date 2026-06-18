@@ -1,41 +1,59 @@
+import { GuildMember, Interaction, Message } from 'discord.js';
+import { configService } from '../core/config.service';
+
 /**
  * Permission service — centralized permission checking.
- * Reads allowed role IDs from configService (which reads from Google Sheet).
+ * Reads EDIT_TAG_MODE from Google Sheet config.
+ * 
+ * EDIT_TAG_MODE formats:
+ *   - 'all' → ทุกคนใช้ได้
+ *   - '484012084577828875,123456789' → เฉพาะ User IDs เหล่านี้ + เจ้าของคดี
+ *   - '' (ว่าง) → เฉพาะเจ้าของคดีเท่านั้น
  */
 export class PermissionService {
     /**
-     * Role IDs ที่มีสิทธิ์แก้ไขแท็กในคดี (ตรงกับ EXEMPT_ROLES ใน 30day)
+     * Check if user has permission to use Edit Tags.
+     * Priority: 1) Owner of case (first mention) 2) Config-based check
      */
-    private static readonly EDIT_TAG_ROLES = ['1507105753461424198', '1507570062649983027', '1507107833890738347'];
+    static canEditTag(interaction: Interaction, targetMessage: Message): boolean {
+        // Priority 1: Is this user the case owner (first mention)?
+        if (PermissionService.isCaseOwner(interaction, targetMessage)) {
+            return true;
+        }
 
-    /**
-     * Check if a member has any of the allowed roles for editing tags.
-     */
-    static hasAllowedEditTagRole(member: any): boolean {
-        return member?.roles?.cache?.some((r: any) => PermissionService.EDIT_TAG_ROLES.includes(r.id)) ?? false;
+        // Priority 2: Check EDIT_TAG_MODE from Sheet
+        const mode = (configService.getEditTagMode() || '').trim();
+
+        // 'all' = ทุกคนใช้ได้
+        if (mode.toLowerCase() === 'all') {
+            return true;
+        }
+
+        // ถ้าเป็น list of IDs → เช็คว่า user อยู่ในลิสต์
+        if (mode) {
+            const ids = mode.split(',').map(id => id.trim()).filter(Boolean);
+            if (ids.includes(interaction.user.id)) {
+                return true;
+            }
+        }
+
+        // Fallback: Admin
+        const member = 'member' in interaction ? interaction.member as GuildMember | null : null;
+        if (member?.permissions?.has('Administrator')) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
-     * Check if member has Administrator permission.
+     * Check if the interaction user is the first mention in the message (case owner).
      */
-    static isAdmin(member: any): boolean {
-        return member?.permissions?.has('Administrator') ?? false;
-    }
-
-    /**
-     * Check if the interaction user is tagged in the target message.
-     */
-    static isMessageOwner(interaction: any, targetMessage: any): boolean {
+    static isCaseOwner(interaction: Interaction, targetMessage: Message): boolean {
         const content = targetMessage.content || '';
-        return content.includes(`<@${interaction.user.id}>`) || content.includes(`<@!${interaction.user.id}>`);
-    }
-
-    /**
-     * Full check: owner OR allowed role OR admin.
-     */
-    static canEditTag(interaction: any, targetMessage: any): boolean {
-        return this.isMessageOwner(interaction, targetMessage)
-            || this.hasAllowedEditTagRole(interaction.member)
-            || this.isAdmin(interaction.member);
+        const mentions = content.match(/<@!?(\d+)>/g) || [];
+        if (mentions.length === 0) return false;
+        const firstId = mentions[0]?.match(/\d+/)?.[0];
+        return firstId === interaction.user.id;
     }
 }

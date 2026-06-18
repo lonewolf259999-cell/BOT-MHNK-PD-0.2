@@ -70,22 +70,24 @@ export class SheetService {
             try {
                 await this.throttle();
                 return await operation();
-            } catch (error: any) {
-                lastError = error;
-                const status = error?.response?.status;
-                const isRetryable = !status || status === 429 || status === 500 || status === 503 || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT';
+            } catch (error: unknown) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                const errObj = error as Record<string, unknown>;
+                const status = typeof errObj?.response === 'object' && errObj.response ? (errObj.response as Record<string, unknown>).status as number | undefined : undefined;
+                const code = typeof errObj?.code === 'string' ? errObj.code : undefined;
+                const isRetryable = !status || status === 429 || status === 500 || status === 503 || code === 'ECONNRESET' || code === 'ETIMEDOUT';
 
                 if (!isRetryable) {
-                    logger.error('SHEET', `[${context}] Non-retryable error`, { status, message: error.message });
-                    throw error;
+                    logger.error('SHEET', `[${context}] Non-retryable error`, { status, message: lastError.message });
+                    throw lastError;
                 }
 
                 if (attempt < MAX_RETRIES) {
                     const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
-                    logger.warn('SHEET', `[${context}] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms`, { status, message: error.message });
+                    logger.warn('SHEET', `[${context}] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms`, { status, message: lastError.message });
                     await new Promise(r => setTimeout(r, delay));
                 } else {
-                    logger.error('SHEET', `[${context}] All ${MAX_RETRIES} attempts failed`, { status, message: error.message });
+                    logger.error('SHEET', `[${context}] All ${MAX_RETRIES} attempts failed`, { status, message: lastError.message });
                 }
             }
         }

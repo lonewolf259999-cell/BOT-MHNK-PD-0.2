@@ -66,8 +66,12 @@ function gracefulShutdown(signal: string): void {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('unhandledRejection', (reason) => logger.error('SYSTEM', `ข้อผิดพลาดที่ไม่ถูกจัดการ: ${reason}`));
-process.on('uncaughtException', (err) => logger.error('SYSTEM', `Exception ที่ไม่ถูกจัดการ: ${err.message}`));
+process.on('unhandledRejection', (reason: unknown) => {
+    logger.error('SYSTEM', `ข้อผิดพลาดที่ไม่ถูกจัดการ: ${reason instanceof Error ? reason.message : String(reason)}`);
+});
+process.on('uncaughtException', (err: Error) => {
+    logger.error('SYSTEM', `Exception ที่ไม่ถูกจัดการ: ${err.message}`);
+});
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
@@ -106,6 +110,20 @@ client.once(Events.ClientReady, async () => {
             .setType(ApplicationCommandType.Message)
             .toJSON()
     );
+
+    // ลบ Guild Commands เก่า (Guild level) เพื่อป้องกันคำสั่งซ้ำกับ Global
+    try {
+        const guild = client.guilds.cache.get(env.guildId);
+        if (guild) {
+            const existingGuild = await guild.commands.fetch();
+            if (existingGuild.size > 0) {
+                await guild.commands.set([]);
+                logger.info('COMMAND', `ลบ ${existingGuild.size} คำสั่ง Guild level เก่า`);
+            }
+        }
+    } catch (e: unknown) {
+        logger.warn('COMMAND', `ลบ Guild commands ไม่สำเร็จ (ไม่ใช่ปัญหา): ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     try {
         await client.application?.commands.set(commands);
@@ -148,7 +166,7 @@ async function start(): Promise<void> {
     await client.login(env.botToken);
 }
 
-start().catch((err) => {
+start().catch((err: Error) => {
     logger.error('STARTUP', `เริ่มบอทไม่สำเร็จ: ${err.message}`);
     process.exit(1);
 });

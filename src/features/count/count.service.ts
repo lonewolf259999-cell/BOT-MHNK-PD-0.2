@@ -1,8 +1,11 @@
+import { Client, CommandInteraction, ButtonInteraction, GuildMember } from 'discord.js';
 import { sheetService } from '../../core/sheet.service';
 import { configService } from '../../core/config.service';
 import { normalizeName, replyAndDelete, silentCatch } from '../../services/utils';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
+import type { TagInfo } from '../../types/discord';
+import { CONSTANTS } from '../../types/discord';
 
 /*
  * IMPORTANT: Actual Sheet Structure
@@ -14,14 +17,13 @@ import { locks } from '../../core/lock.service';
  * Column indices: A=0, B=1, C=2, D=3, E=4, F=5, G=6
  * Data starts at row index 3 (0-based)
  */
-const DATA_START_ROW = 3; // Row 4 in sheet (0-based index 3)
 
 /**
  * Find row index by exact Discord User ID match in Column B (index 1).
  * Only searches data rows (index 3+).
  */
 function findRowById(rows: string[][], userId: string): number {
-    for (let i = DATA_START_ROW; i < rows.length; i++) {
+    for (let i = CONSTANTS.COUNT_DATA_START; i < rows.length; i++) {
         if (rows[i]?.length > 1 && rows[i][1] === userId) return i;
     }
     return -1;
@@ -32,10 +34,10 @@ function findRowById(rows: string[][], userId: string): number {
  * For existing rows that may not have User ID in Column B yet.
  * Only searches data rows (index 3+).
  */
-function findRowByName(rows: string[][], tag: { id: string; nickname: string; username: string }): number {
+function findRowByName(rows: string[][], tag: TagInfo): number {
     const n = normalizeName(tag.nickname);
     const u = normalizeName(tag.username);
-    for (let i = DATA_START_ROW; i < rows.length; i++) {
+    for (let i = CONSTANTS.COUNT_DATA_START; i < rows.length; i++) {
         const nameCell = rows[i]?.[0]; // Column A = display name
         const idCell = rows[i]?.[1];   // Column B = User ID (may be empty in old data)
         if (nameCell) {
@@ -58,7 +60,7 @@ function findRowByName(rows: string[][], tag: { id: string; nickname: string; us
  * 
  * Sheet format: [A=displayName, B=UserID, C=Take2, D=คดีปกติ, E=รถยอด, F=คุมสอบ, G=อุ้มเอ๋อ]
  */
-function ensureUserRow(rows: string[][], tag: { id: string; nickname: string; username: string }): number {
+function ensureUserRow(rows: string[][], tag: TagInfo): number {
     // Priority 1: Exact User ID match in Column B
     let idx = findRowById(rows, tag.id);
     if (idx !== -1) return idx;
@@ -77,7 +79,7 @@ function ensureUserRow(rows: string[][], tag: { id: string; nickname: string; us
 }
 
 export async function processCountBatch(
-    tags: { id: string; nickname: string; username: string }[],
+    tags: TagInfo[],
     channelId: string,
     isDelete: boolean
 ): Promise<void> {
@@ -104,13 +106,13 @@ export async function processCountBatch(
         );
 
         // If sheet is too short, ensure it has at least DATA_START_ROW rows
-        while (rows.length < DATA_START_ROW) {
+        while (rows.length < CONSTANTS.COUNT_DATA_START) {
             rows.push([]);
         }
 
         // Ensure header row exists at row index 3 (0-based)
-        if (rows[DATA_START_ROW - 1]?.length < 7 || !rows[DATA_START_ROW - 1]?.[0]) {
-            rows[DATA_START_ROW - 1] = ['ชื่อDC', 'User ID', 'Take2', 'คดีปกติ', 'รถยอด', 'คุมสอบ', 'อุ้มเอ๋อ'];
+        if (rows[CONSTANTS.COUNT_DATA_START - 1]?.length < 7 || !rows[CONSTANTS.COUNT_DATA_START - 1]?.[0]) {
+            rows[CONSTANTS.COUNT_DATA_START - 1] = CONSTANTS.COUNT_HEADER;
         }
 
         for (const p of tags) {
@@ -131,14 +133,19 @@ export async function processCountBatch(
     });
 }
 
-export async function manualRecount(client: any, interaction: any): Promise<void> {
+/**
+ * Shared interaction type for manual recount — only needs deferReply, editReply, guild
+ */
+type RecountInteraction = CommandInteraction<'cached'> | ButtonInteraction<'cached'>;
+
+export async function manualRecount(client: Client, interaction: RecountInteraction): Promise<void> {
     return locks.count.run(async () => {
         const cfg = configService.getCountConfig();
         if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) {
             try {
                 await interaction.deferReply({ flags: 64 }).catch(silentCatch('Count'));
                 await interaction.editReply({ content: '❌ ยังไม่ได้ตั้งค่า' });
-            } catch {}
+            } catch { /* ignore */ }
             return;
         }
 
@@ -154,17 +161,17 @@ export async function manualRecount(client: any, interaction: any): Promise<void
         );
 
         // Ensure sheet has minimum structure
-        while (rows.length < DATA_START_ROW) {
+        while (rows.length < CONSTANTS.COUNT_DATA_START) {
             rows.push([]);
         }
 
         // Ensure header row exists at row index 3 (0-based)
-        if (rows[DATA_START_ROW - 1]?.length < 7 || !rows[DATA_START_ROW - 1]?.[0]) {
-            rows[DATA_START_ROW - 1] = ['ชื่อDC', 'User ID', 'Take2', 'คดีปกติ', 'รถยอด', 'คุมสอบ', 'อุ้มเอ๋อ'];
+        if (rows[CONSTANTS.COUNT_DATA_START - 1]?.length < 7 || !rows[CONSTANTS.COUNT_DATA_START - 1]?.[0]) {
+            rows[CONSTANTS.COUNT_DATA_START - 1] = CONSTANTS.COUNT_HEADER;
         }
 
         // Reset all count columns (C-G, indices 2-6) for existing data rows only (index 3+)
-        for (let i = DATA_START_ROW; i < rows.length; i++) {
+        for (let i = CONSTANTS.COUNT_DATA_START; i < rows.length; i++) {
             if (rows[i]) {
                 // Ensure row has enough columns (at least 7: A-G)
                 while (rows[i].length < 7) rows[i].push('0');
@@ -184,14 +191,14 @@ export async function manualRecount(client: any, interaction: any): Promise<void
         ];
 
         // Cache fetched Discord users to avoid repeated API calls
-        const userCache = new Map<string, { id: string; nickname: string; username: string }>();
+        const userCache = new Map<string, TagInfo>();
         let totalMessages = 0;
 
         for (const ch of channels) {
             if (!ch.id) continue;
 
             const channel = client.channels.cache.get(ch.id);
-            if (!channel) continue;
+            if (!channel || !channel.isTextBased()) continue;
 
             let lastId: string | undefined;
             let hasMore = true;

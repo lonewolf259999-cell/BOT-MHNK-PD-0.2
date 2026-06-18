@@ -1,4 +1,5 @@
-import { EmbedBuilder, Message } from 'discord.js';
+import { EmbedBuilder, Message, Guild, GuildTextBasedChannel } from 'discord.js';
+import type { APIEmbed } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { sleep } from '../../services/utils';
@@ -14,7 +15,7 @@ const tagCache = new Map<string, { tag: string; expires: number }>();
 let activeSends = 0;
 const MAX_CONCURRENT = 1;
 
-async function sendWithQueue(ch: any, guild: any, content: string): Promise<boolean> {
+async function sendWithQueue(ch: GuildTextBasedChannel, guild: Guild, content: string): Promise<boolean> {
     while (activeSends >= MAX_CONCURRENT) {
         await sleep(200);
     }
@@ -22,8 +23,8 @@ async function sendWithQueue(ch: any, guild: any, content: string): Promise<bool
     try {
         await sendBypdReport(ch, guild, content);
         return true;
-    } catch (err) {
-        logger.error('BYPD', `ส่งรายงานล้มเหลว: ${err}`);
+    } catch (err: unknown) {
+        logger.error('BYPD', `ส่งรายงานล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
         return false;
     } finally {
         activeSends--;
@@ -31,16 +32,16 @@ async function sendWithQueue(ch: any, guild: any, content: string): Promise<bool
 }
 
 /** ดึงข้อความจาก embed เดียว */
-function extractEmbedContent(embed: any): string {
+function extractEmbedContent(embed: APIEmbed): string {
     const texts: string[] = [];
     if (embed.title) texts.push(embed.title);
     if (embed.description) texts.push(embed.description);
-    embed.fields?.forEach((f: any) => { if (f.name) texts.push(f.name); if (f.value) texts.push(f.value); });
+    embed.fields?.forEach((f) => { if (f.name) texts.push(f.name); if (f.value) texts.push(f.value); });
     if (embed.footer?.text) texts.push(embed.footer.text);
     return texts.join('\n');
 }
 
-async function resolveTags(guild: any, content: string): Promise<string[]> {
+async function resolveTags(guild: Guild, content: string): Promise<string[]> {
     const match = content.match(/(?:BYPD)\s+((?:\d{2,3}\s*)+)/i);
     const codes = match ? match[1].trim().split(/\s+/) : [];
     const tags: string[] = [];
@@ -57,13 +58,13 @@ async function resolveTags(guild: any, content: string): Promise<string[]> {
         }
 
         // 2. หาจาก members.cache (ไม่มี API call)
-        let m = guild.members.cache.find((mm: any) => (mm.nickname || '').startsWith(prefix));
+        let m = guild.members.cache.find((mm) => (mm.nickname || '').startsWith(prefix));
 
         // 3. ถ้าไม่เจอ → เรียก API
         if (!m) {
             try {
                 const f = await guild.members.fetch({ query: code, limit: 10 });
-                m = f.find((mm: any) => (mm.nickname || '').startsWith(prefix));
+                m = f.find((mm) => (mm.nickname || '').startsWith(prefix));
             } catch {
                 // members.fetch ล้มเหลว → ใช้ @code
             }
@@ -92,7 +93,7 @@ function parseDetails(content: string) {
 }
 
 /** ส่ง report BYPD หนึ่งคดี (1 embed หรือ 1 content) */
-async function sendBypdReport(ch: any, guild: any, content: string): Promise<void> {
+async function sendBypdReport(ch: GuildTextBasedChannel, guild: Guild, content: string): Promise<void> {
     const tags = await resolveTags(guild, content);
     const det = parseDetails(content);
     await ch.send({
@@ -128,16 +129,16 @@ export async function processBypd(message: Message): Promise<boolean> {
 
     // 1. เช็ค message.content
     if (message.content?.trim() && message.content.toUpperCase().includes('BYPD')) {
-        const ok = await sendWithQueue(ch, guild, message.content.trim());
+        const ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, message.content.trim());
         if (ok) count++;
         await sleep(1000);
     }
 
     // 2. วนลูปทุก embed (1 embed = 1 คดี)
     for (const embed of message.embeds) {
-        if (hasBypdInEmbed(embed)) {
-            const content = extractEmbedContent(embed);
-            const ok = await sendWithQueue(ch, guild, content);
+        if (hasBypdInEmbed(embed.toJSON())) {
+            const content = extractEmbedContent(embed.toJSON());
+            const ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, content);
             if (ok) count++;
             await sleep(1000);
         }
@@ -145,7 +146,7 @@ export async function processBypd(message: Message): Promise<boolean> {
 
     if (count > 0) {
         // ✅ reaction แรก = บอกว่าระบบ process แล้ว (สำหรับระบบส่งย้อนหลัง)
-        try { await message.react('✅'); } catch {}
+        try { await message.react('✅'); } catch { /* ignore */ }
 
         // อิโมจิที่ 2 = บอกจำนวนคดี (ถ้ามากกว่า 1)
         if (count > 1) {
@@ -155,7 +156,7 @@ export async function processBypd(message: Message): Promise<boolean> {
             };
             const emoji = emojiMap[count];
             if (emoji) {
-                try { await message.react(emoji); } catch {}
+                try { await message.react(emoji); } catch { /* ignore */ }
             }
         }
         logger.info('BYPD', `ส่ง ${count} คดี จากข้อความ ${message.id}`);

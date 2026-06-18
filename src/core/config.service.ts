@@ -14,9 +14,14 @@ export class ConfigService {
     private logtimeChannelId = '';
     private logCaseChannelId = '';
     private bypdSendChannelId = '';
-    async load(): Promise<void> {
+    private editTagMode = '';
+    private exemptRoles: string[] = [];
+    private thirtyDayRoleId = '';
+    private dayThreshold = 30;
+    async load(bypassCache = false): Promise<void> {
         try {
-            const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 30000);
+            const ttl = bypassCache ? 0 : 30000;
+            const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, ttl);
             this.data = {};
             for (const row of rows) { if (row[0]) this.data[row[0]] = row[1] ? row[1].trim() : ''; }
             const parts = (this.data.COUNT_CHANNEL_IDS || '').split(',');
@@ -29,6 +34,11 @@ export class ConfigService {
             this.logtimeChannelId = this.data.LOGTIME_CHANNEL_ID || '';
             this.logCaseChannelId = this.data.LOGCASE_CHANNEL_ID || '';
             this.bypdSendChannelId = this.data.BYPD_SEND_CHANNEL_ID || '';
+            this.editTagMode = this.data.EDIT_TAG_MODE || '';
+            const exemptRaw = this.data.EXEMPT_ROLES || '1507105753461424198,1507570062649983027,1507107833890738347';
+            this.exemptRoles = exemptRaw.split(',').map(s => s.trim()).filter(Boolean);
+            this.thirtyDayRoleId = this.data.THIRTY_DAY_ROLE_ID || '1509659434681635096';
+            this.dayThreshold = parseInt(this.data.DAY_THRESHOLD || '30', 10) || 30;
             this.loaded = true;
             logger.info('CONFIG', 'โหลด Config จาก Google Sheet สำเร็จ');
         } catch (error) {
@@ -38,7 +48,7 @@ export class ConfigService {
         }
     }
 
-    async reload(): Promise<void> { this.loaded = false; return this.load(); }
+    async reload(): Promise<void> { this.loaded = false; return this.load(true); }
     isLoaded(): boolean { return this.loaded; }
     getRaw(key: string): string { return this.data[key] || ''; }
     getCountConfig() { return this.countConfig; }
@@ -50,6 +60,10 @@ export class ConfigService {
     getBypdSendChannelId(): string { return this.bypdSendChannelId; }
     getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
     getPendingSheetName(): string { return this.pendingSheetName; }
+    getEditTagMode(): string { return this.editTagMode; }
+    getExemptRoles(): string[] { return this.exemptRoles; }
+    getThirtyDayRoleId(): string { return this.thirtyDayRoleId; }
+    getDayThreshold(): number { return this.dayThreshold; }
 
     async writeConfigKeys(updates: [string, string][]): Promise<void> {
         const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 0);
