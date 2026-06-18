@@ -1,4 +1,4 @@
-import { Client, Events, ContextMenuCommandBuilder, ApplicationCommandType, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
+import { Client, Events, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, MessageFlags, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { findMembersByCode } from '../../services/member.service';
 import { rateLimiter } from '../../core/ratelimiter';
 import { logger } from '../../core/logger';
@@ -16,13 +16,8 @@ async function fetchMsg(client: Client, channelId: string, messageId: string): P
 }
 
 export function setupEditTagFeature(client: Client): void {
-    client.once(Events.ClientReady, async () => {
-        try {
-            const existing = await client.application?.commands.fetch();
-            if (!existing?.find(c => c.name === 'Edit Tags')) await client.application?.commands.create(new ContextMenuCommandBuilder().setName('Edit Tags').setType(ApplicationCommandType.Message));
-            logger.info('แก้แท็ก', 'ลงทะเบียน Context Menu สำเร็จ');
-        } catch (e) { logger.error('แก้แท็ก', `ลงทะเบียนล้มเหลว: ${e}`); }
-    });
+    // Context Menu "Edit Tags" ลงทะเบียนผ่าน Bulk Registration ใน index.ts แล้ว
+    // ไม่ต้องลงทะเบียนซ้ำที่นี่
 
     client.on(Events.InteractionCreate, async (i: any) => {
         try {

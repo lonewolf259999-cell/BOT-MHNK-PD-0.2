@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, Events, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Events, SlashCommandBuilder, ContextMenuCommandBuilder, ApplicationCommandType, PermissionFlagsBits, type RESTPostAPIApplicationCommandsJSONBody } from 'discord.js';
 import http from 'http';
 import https from 'https';
 import { env, BOT, CACHE, validate } from './config';
@@ -81,7 +81,8 @@ client.once(Events.ClientReady, async () => {
     logger.info('CLIENT', `${client.user?.tag} ออนไลน์พร้อมทำงาน!`);
 
     // ✅ ลงทะเบียน Slash Commands ทั้งหมดด้วย Bulk Registration
-    const commandDefs = [
+    // ✅ Slash Commands
+    const slashDefs = [
         { name: '30day', description: '⏳ ตรวจสอบและจัดการสมาชิกครบ 30 วัน', permissions: 0 },
         { name: 'editpd', description: '📝 แก้ไขโปรไฟล์ตำรวจ (ชื่อ IC, เบอร์โทร, อายุ)' },
         { name: 'recount', description: '⚙️ แผงควบคุมตั้งค่าและนับยอดเคส' },
@@ -89,7 +90,7 @@ client.once(Events.ClientReady, async () => {
         { name: 'de', description: 'ลบข้อความล่าสุดในแชนแนลนี้ (สูงสุด 500)', permissions: PermissionFlagsBits.ManageMessages },
     ];
 
-    const commands = commandDefs.map(def => {
+    const commands: RESTPostAPIApplicationCommandsJSONBody[] = slashDefs.map(def => {
         const cmd = new SlashCommandBuilder().setName(def.name).setDescription(def.description);
         if (def.name === 'de') {
             cmd.addIntegerOption(opt => opt.setName('amount').setDescription('จำนวนข้อความที่ต้องการลบ (1-500)').setRequired(true).setMinValue(1).setMaxValue(500));
@@ -97,6 +98,14 @@ client.once(Events.ClientReady, async () => {
         if (def.permissions !== undefined) cmd.setDefaultMemberPermissions(def.permissions);
         return cmd.toJSON();
     });
+
+    // ✅ Context Menu — รวมไว้ใน bulk registration เพื่อป้องกันหายตอน restart
+    commands.push(
+        new ContextMenuCommandBuilder()
+            .setName('Edit Tags')
+            .setType(ApplicationCommandType.Message)
+            .toJSON()
+    );
 
     try {
         await client.application?.commands.set(commands);

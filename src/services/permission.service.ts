@@ -4,13 +4,15 @@
  */
 export class PermissionService {
     /**
+     * Role IDs ที่มีสิทธิ์แก้ไขแท็กในคดี (ตรงกับ EXEMPT_ROLES ใน 30day)
+     */
+    private static readonly EDIT_TAG_ROLES = ['1507105753461424198', '1507570062649983027', '1507107833890738347'];
+
+    /**
      * Check if a member has any of the allowed roles for editing tags.
      */
     static hasAllowedEditTagRole(member: any): boolean {
-        // TODO: หลังจากทำ ข้อ 2 จะอ่านจาก configService.getThirtyDayConfig().exemptRoles
-        // ตอนนี้ใช้ hardcode เหมือนเดิมก่อน
-        const exemptRoles = ['1507105753461424198', '1507570062649983027', '1507107833890738347'];
-        return member?.roles?.cache?.some((r: any) => exemptRoles.includes(r.id)) ?? false;
+        return member?.roles?.cache?.some((r: any) => PermissionService.EDIT_TAG_ROLES.includes(r.id)) ?? false;
     }
 
     /**

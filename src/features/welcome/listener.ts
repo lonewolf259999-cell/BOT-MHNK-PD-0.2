@@ -26,24 +26,6 @@ function buildRegEmbed(userId: string, icName: string, icPhone: string, ocAge: s
 }
 
 /**
- * สร้าง embed 🎉 ยินดีต้อนรับ (ส่งไป Welcome Channel)
- */
-function buildWelcomeEmbed(userId: string, displayAvatarUrl: string, nickname: string, memberCount: number) {
-    const embed = new EmbedBuilder()
-        .setColor('#3aca1d')
-        .setTitle('🎉 ยินดีต้อนรับสู่ Mahanakorn Diwa!')
-        .setDescription(`ยินดีต้อนรับ <@${userId}> สู่ Mahanakorn Diwa!\n📛 **ชื่อในระบบ:** \`${nickname}\``)
-        .setThumbnail(displayAvatarUrl)
-        .addFields(
-            { name: '👤 สมาชิก', value: `<@${userId}>`, inline: true },
-            { name: '👥 สมาชิกรวม', value: `${memberCount} คน`, inline: true }
-        )
-        .setFooter({ text: 'MHNK Police Department • ยินดีต้อนรับ' })
-        .setTimestamp();
-    return embed;
-}
-
-/**
  * สร้าง embed ต้อนรับแบบทั่วไป (ใช้แทนการสร้าง EmbedBuilder ซ้ำ 3 แบบ)
  * @param color - สี embed
  * @param title - หัวข้อ
@@ -102,7 +84,15 @@ export function setupWelcomeFeature(client: Client): void {
                     try { await member.setNickname(result.nickname); } catch { nickChanged = false; }
 
                     await ch.send({
-                        embeds: [buildWelcomeEmbed(member.user.id, member.user.displayAvatarURL(), result.nickname, member.guild.memberCount)]
+                        embeds: [buildWelcomeEmbedV2(
+                            '#3aca1d',
+                            '🎉 ยินดีต้อนรับสู่ Mahanakorn Diwa!',
+                            `ยินดีต้อนรับ <@${member.user.id}> สู่ Mahanakorn Diwa!\n📛 **ชื่อในระบบ:** \`${result.nickname}\``,
+                            member.user.id,
+                            member.user.displayAvatarURL(),
+                            member.guild.memberCount,
+                            'MHNK Police Department • ยินดีต้อนรับ'
+                        )]
                     });
 
                     const regEmbed = buildRegEmbed(
