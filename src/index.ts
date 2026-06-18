@@ -157,7 +157,6 @@ async function start(): Promise<void> {
     for (const setupFn of featureSetups) {
         try {
             setupFn(client);
-            logger.debug('FEATURE', 'โหลดฟีเจอร์สำเร็จ');
         } catch (err) {
             logger.error('FEATURE', `โหลดฟีเจอร์ล้มเหลว: ${err}`);
         }
