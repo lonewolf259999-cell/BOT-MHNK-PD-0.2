@@ -84,7 +84,7 @@ export function setupRecountFeature(client: Client): void {
                 await refreshPanel(btn);
                 await btn.editReply({ content: '🔄 กำลังส่งย้อนหลัง BYPD...\n⏳ กำลังสแกนห้อง Log...' });
                 try {
-                    const r = await runResendMissed(client, btn, abort.signal);
+                    const r = await runResendMissed(btn, abort.signal);
                     resendStates.set(guildId, { isRunning: false, abortController: null, totalSent: r.sent, totalFailed: r.failed });
                     await refreshPanel(btn);
                     await replyAndDelete(btn, r.message);
@@ -171,7 +171,7 @@ interface ResendResult {
     message: string;
 }
 
-async function runResendMissed(_client: Client, interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal): Promise<ResendResult> {
+async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal): Promise<ResendResult> {
     const logChannelId = configService.getLogCaseChannelId();
     const guild = interaction.guild;
     if (!logChannelId || !guild) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };

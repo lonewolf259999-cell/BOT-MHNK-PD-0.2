@@ -34,17 +34,6 @@ export async function checkPreApproved(discordId: string): Promise<{ approved: b
     }
 }
 
-// 🔥 Queue System ป้องกัน race condition
-let registrationQueue: Promise<any> = Promise.resolve();
-
-function enqueue<T>(task: () => Promise<T>): Promise<T> {
-    registrationQueue = registrationQueue.then(task, task).catch((e) => {
-        logger.error('สมัคร', `Queue error: ${e}`);
-        return undefined;
-    });
-    return registrationQueue as Promise<T>;
-}
-
 export async function isAlreadyRegistered(userId: string, bypassCache = false): Promise<boolean> {
     const reg = configService.getRegistryConfig();
     if (!reg.spreadsheetId || !reg.sheetName) return false;
@@ -59,65 +48,64 @@ export async function isAlreadyRegistered(userId: string, bypassCache = false): 
 }
 
 export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
-    if (await isAlreadyRegistered(userId, false)) {
-        logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ (pre-check)`);
-        return null;
-    }
-    return enqueue(() => _executeRegister(icName, userId));
-}
-
-async function _executeRegister(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
-    try {
-        const reg = configService.getRegistryConfig();
-        if (!reg.spreadsheetId || !reg.sheetName) return null;
-
-        const already = await isAlreadyRegistered(userId, true);
-        if (already) {
-            logger.warn('สมัคร', `ผู้ใช้ ${userId} สมัครซ้ำ (ตรวจพบใน Queue) — ข้าม`);
+    return locks.sheetMutation.run(async () => {
+        if (await isAlreadyRegistered(userId, false)) {
+            logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ (pre-check)`);
             return null;
         }
 
-        const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:D`, 0);
-        let targetRow = -1, codeNumber = '';
+        try {
+            const reg = configService.getRegistryConfig();
+            if (!reg.spreadsheetId || !reg.sheetName) return null;
 
-        for (let i = 2; i < rows.length; i++) {
-            if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) {
-                targetRow = i + 1;
-                codeNumber = rows[i][0].trim();
-                break;
+            const already = await isAlreadyRegistered(userId, true);
+            if (already) {
+                logger.warn('สมัคร', `ผู้ใช้ ${userId} สมัครซ้ำ (ตรวจพบใน Queue) — ข้าม`);
+                return null;
             }
-        }
 
-        if (targetRow === -1) {
-            const dyn = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C${rows.length + 1}:C${rows.length + 20}`, 0);
-            for (let j = 0; j < dyn.length; j++) {
-                if (dyn[j][0]) {
-                    targetRow = rows.length + j + 1;
-                    codeNumber = dyn[j][0].trim();
+            const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:D`, 0);
+            let targetRow = -1, codeNumber = '';
+
+            for (let i = 2; i < rows.length; i++) {
+                if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) {
+                    targetRow = i + 1;
+                    codeNumber = rows[i][0].trim();
                     break;
                 }
             }
-        }
 
-        if (targetRow === -1) {
-            logger.warn('สมัคร', 'ไม่พบแถวว่างที่มีรหัส');
+            if (targetRow === -1) {
+                const dyn = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C${rows.length + 1}:C${rows.length + 20}`, 0);
+                for (let j = 0; j < dyn.length; j++) {
+                    if (dyn[j][0]) {
+                        targetRow = rows.length + j + 1;
+                        codeNumber = dyn[j][0].trim();
+                        break;
+                    }
+                }
+            }
+
+            if (targetRow === -1) {
+                logger.warn('สมัคร', 'ไม่พบแถวว่างที่มีรหัส');
+                return null;
+            }
+
+            const fullNickname = makeFullName(codeNumber, icName);
+            const truncatedNick = truncateNickname(fullNickname);
+            const today = new Date();
+            const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+
+            await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:E${targetRow}`, [[truncatedNick, `'<@${userId}>`]]);
+            await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
+            logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
+            return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
+
+        } catch (error) {
+            logger.error('สมัคร', `เกิดข้อผิดพลาด: ${error}`);
             return null;
         }
-
-        const fullNickname = makeFullName(codeNumber, icName);
-        const truncatedNick = truncateNickname(fullNickname);
-        const today = new Date();
-        const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
-
-        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:E${targetRow}`, [[truncatedNick, `'<@${userId}>`]]);
-        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
-        logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
-        return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
-
-    } catch (error) {
-        logger.error('สมัคร', `เกิดข้อผิดพลาด: ${error}`);
-        return null;
-    }
+    });
 }
 
 /**
