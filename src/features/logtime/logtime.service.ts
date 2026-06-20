@@ -14,8 +14,6 @@ interface LogtimeInfo {
     duration?: string;
 }
 
-const NEW_ROW_MIN = 3;
-
 const WEEKDAY_COL: Record<number, string> = {
     1: 'O',  // Mon
     2: 'P',  // Tue
@@ -56,94 +54,91 @@ function getColumnByDate(dateStr: string): string | null {
 }
 
 /**
- * Find the target row matching the logtime entry.
+ * Single-pass findRow: iterate once, accumulate all candidates.
  *
- * Logic (4 steps):
- *   1. Match by M (Steam ID) → write J:K only
- *   2. Match by D (name, M empty) → write J:K + M
- *   3. Match by X+Y (registered outsider) → skip
- *   4. No match anywhere → create new X:Y entry
+ * Priority during scan:
+ *   - Steam match (M col) → immediate return
+ *   - Forward name match (D col, M empty) → bestCandidate
+ *   - Backward name match (D col, M empty) → backupCandidate
+ *   - X+Y skip check
+ *   - First empty X row → newRowCandidate
  */
 function findRow(rows: string[][], name: string, steamId?: string): FindResult {
     const n = normalizeName(name);
     const s = steamId ? normalizeName(steamId) : undefined;
 
-    /** Extract IC name from D cell e.g. "123 [MHNK-PD] Name" → "name" */
-    function icNameFromD(cell: string): string {
-        if (!cell) return '';
-        const match = String(cell).match(/\]\s*(.+)$/);
-        return match ? normalizeName(match[1]) : normalizeName(cell);
-    }
+    let bestCandidate: { row: number; priority: number } | null = null;
+    let firstEmptyX: number | null = null;
 
-    /** Check if normalised name matches the D cell (forward match) */
-    function nameMatchesD(nameNorm: string, dCell: string): boolean {
-        if (!dCell) return false;
-        const fullNorm = normalizeName(dCell);
-        const icNorm = icNameFromD(dCell);
-        return fullNorm.includes(nameNorm) || icNorm.includes(nameNorm);
-    }
-
-    /** Backward match: if log name is longer than cell name (trimmed), compare prefix */
-    function nameMatchesDBackward(nameNorm: string, dCell: string): boolean {
-        if (!dCell) return false;
-        const fullNorm = normalizeName(dCell);
-        const icNorm = icNameFromD(dCell);
-
-        // Try IC part first (name after ])
-        if (icNorm.length > 0 && icNorm.length < nameNorm.length) {
-            const partial = nameNorm.slice(0, icNorm.length);
-            if (partial === icNorm) return true;
-        }
-        // Try full cell
-        if (fullNorm.length > 0 && fullNorm.length < nameNorm.length) {
-            const partial = nameNorm.slice(0, fullNorm.length);
-            if (partial === fullNorm) return true;
-        }
-        return false;
-    }
-
-    // STEP 1: Match by Steam ID (M column = row[9])
-    if (s) {
-        for (let idx = 2; idx < rows.length; idx++) {
-            const mSteam = rows[idx]?.[9] ? normalizeName(rows[idx][9]) : '';
-            if (mSteam === s) return { action: 'update_time', row: idx + 1 };
-        }
-    }
-
-    // STEP 2: Match by name (D column = row[0]) — only if M is empty
-    // Forward match first (priority)
     for (let idx = 2; idx < rows.length; idx++) {
         const dCell = rows[idx]?.[0] || '';
-        if (!dCell) continue;
-        if (rows[idx]?.[9] && String(rows[idx][9]).trim()) continue;
-        if (nameMatchesD(n, dCell)) return { action: 'update_time_steam', row: idx + 1 };
-    }
-    // Backward match second (fallback for trimmed names)
-    for (let idx = 2; idx < rows.length; idx++) {
-        const dCell = rows[idx]?.[0] || '';
-        if (!dCell) continue;
-        if (rows[idx]?.[9] && String(rows[idx][9]).trim()) continue;
-        if (nameMatchesDBackward(n, dCell)) return { action: 'update_time_steam', row: idx + 1 };
-    }
+        const mCell = rows[idx]?.[9] ? normalizeName(rows[idx][9]) : '';
+        const xCell = rows[idx]?.[20] ? normalizeName(rows[idx][20]) : '';
+        const yCell = rows[idx]?.[21] ? normalizeName(rows[idx][21]) : '';
+        const hasM = rows[idx]?.[9] && String(rows[idx][9]).trim();
 
-    // STEP 3: Check if person already exists in X+Y (registered outsider)
-    if (s) {
-        for (let idx = NEW_ROW_MIN - 1; idx < rows.length; idx++) {
-            const xName = rows[idx]?.[20] ? normalizeName(rows[idx][20]) : '';
-            const ySteam = rows[idx]?.[21] ? normalizeName(rows[idx][21]) : '';
-            if (!xName) continue;
-            const nameMatch = xName.includes(n) || n.includes(xName);
-            const steamMatch = s && ySteam && ySteam === s;
-            if (nameMatch && steamMatch) return { action: 'skip' };
+        // Track first empty X row for potential new entry
+        if (firstEmptyX === null && (!xCell || !String(rows[idx][20]).trim())) {
+            firstEmptyX = idx + 1;
+        }
+
+        // PRIORITY 1: Steam ID match → immediate return
+        if (s && mCell === s) {
+            return { action: 'update_time', row: idx + 1 };
+        }
+
+        // PRIORITY 2: Forward name match (D col, M empty)
+        if (dCell && !hasM) {
+            const fullNorm = normalizeName(dCell);
+            const icMatch = dCell.match(/\]\s*(.+)$/);
+            const icNorm = icMatch ? normalizeName(icMatch[1]) : normalizeName(dCell);
+
+            if (fullNorm.includes(n) || icNorm.includes(n)) {
+                if (!bestCandidate || bestCandidate.priority > 1) {
+                    bestCandidate = { row: idx + 1, priority: 1 };
+                }
+            }
+        }
+
+        // PRIORITY 3: Backward name match (D col, M empty)
+        if (dCell && !hasM && (!bestCandidate || bestCandidate.priority >= 2)) {
+            const fullNorm = normalizeName(dCell);
+            const icMatch = dCell.match(/\]\s*(.+)$/);
+            const icNorm = icMatch ? normalizeName(icMatch[1]) : normalizeName(dCell);
+
+            let backwardMatch = false;
+            if (icNorm.length > 0 && icNorm.length < n.length) {
+                if (n.slice(0, icNorm.length) === icNorm) backwardMatch = true;
+            }
+            if (!backwardMatch && fullNorm.length > 0 && fullNorm.length < n.length) {
+                if (n.slice(0, fullNorm.length) === fullNorm) backwardMatch = true;
+            }
+
+            if (backwardMatch) {
+                bestCandidate = { row: idx + 1, priority: 2 };
+            }
+        }
+
+        // PRIORITY 4: X+Y skip check
+        if (s && xCell && yCell) {
+            const nameMatch = xCell.includes(n) || n.includes(xCell);
+            const steamMatch = yCell === s;
+            if (nameMatch && steamMatch) {
+                return { action: 'skip' };
+            }
         }
     }
 
-    // STEP 4: Find first empty row (X column empty) and create new entry
-    for (let r = NEW_ROW_MIN; r <= rows.length; r++) {
-        if (!rows[r - 1]?.[20] || !String(rows[r - 1][20]).trim())
-            return { action: 'create_new', row: r };
+    // Return best match found
+    if (bestCandidate) {
+        return bestCandidate.priority <= 1
+            ? { action: 'update_time', row: bestCandidate.row }
+            : { action: 'update_time_steam', row: bestCandidate.row };
     }
-    return { action: 'create_new', row: rows.length + 1 };
+
+    // Create new entry at first empty X row or end
+    const newRow = firstEmptyX ?? (rows.length + 1);
+    return { action: 'create_new', row: newRow };
 }
 
 /** Read current accumulated minutes from a weekday column (O-U) for a given row */

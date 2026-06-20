@@ -5,7 +5,7 @@ import { env, BOT, CACHE, validate } from './config';
 import { configService } from './core/config.service';
 import { rateLimiter } from './core/ratelimiter';
 import { logger } from './core/logger';
-import { clearAllReplyTimeouts } from './services/utils';
+import { clearAllReplyTimeouts, silentCatch } from './services/utils';
 
 const errors = validate();
 if (errors.length > 0) {
@@ -59,8 +59,8 @@ function gracefulShutdown(signal: string): void {
     logger.info('SHUTDOWN', `ได้รับสัญญาณ ${signal} — กำลังปิดระบบอย่างปลอดภัย...`);
     try {
         clearAllReplyTimeouts();
-    } catch {}
-    client.destroy().catch(() => {});
+    } catch (e) { logger.warn('SHUTDOWN', String(e)); }
+    client.destroy().catch(silentCatch('SHUTDOWN'));
     setTimeout(() => process.exit(0), BOT.GRACEFUL_SHUTDOWN_TIMEOUT_MS);
 }
 

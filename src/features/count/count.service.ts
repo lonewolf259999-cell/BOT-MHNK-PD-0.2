@@ -7,6 +7,72 @@ import { locks } from '../../core/lock.service';
 import type { TagInfo } from '../../types/discord';
 import { CONSTANTS } from '../../types/discord';
 
+/** Queued batch: accumulate count changes and flush periodically */
+interface CountOp {
+    tag: TagInfo;
+    channelId: string;
+    isDelete: boolean;
+}
+
+let countQueue: CountOp[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleFlush(): void {
+    if (flushTimer) return;
+    flushTimer = setTimeout(async () => {
+        flushTimer = null;
+        try {
+            await flushCountQueue();
+        } catch (e) {
+            logger.error('นับเคส', `flush error: ${e}`);
+        }
+    }, 3000);
+}
+
+async function flushCountQueue(): Promise<void> {
+    const ops = countQueue;
+    countQueue = [];
+    if (ops.length === 0) return;
+
+    await locks.count.run(async () => {
+        const cfg = configService.getCountConfig();
+        if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) return;
+
+        const chMap: Record<string, number> = {
+            [cfg.CHANNELS.CHANNEL_1]: 2,
+            [cfg.CHANNELS.CHANNEL_2]: 3,
+            [cfg.CHANNELS.CHANNEL_3]: 4,
+            [cfg.CHANNELS.CHANNEL_4]: 5,
+            [cfg.CHANNELS.CHANNEL_5]: 6,
+        };
+
+        const byChannel = new Map<string, typeof ops>();
+        for (const op of ops) {
+            const arr = byChannel.get(op.channelId);
+            if (arr) arr.push(op);
+            else byChannel.set(op.channelId, [op]);
+        }
+
+        const rows = await sheetService.getValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A:G`, 0);
+        while (rows.length < CONSTANTS.COUNT_DATA_START) rows.push([]);
+        if (rows[CONSTANTS.COUNT_DATA_START - 1]?.length < 7 || !rows[CONSTANTS.COUNT_DATA_START - 1]?.[0]) {
+            rows[CONSTANTS.COUNT_DATA_START - 1] = CONSTANTS.COUNT_HEADER;
+        }
+
+        for (const [channelId, channelOps] of byChannel) {
+            const colIdx = chMap[channelId];
+            if (colIdx === undefined) continue;
+            for (const op of channelOps) {
+                const rowIdx = ensureUserRow(rows, op.tag);
+                const currentVal = parseInt(rows[rowIdx][colIdx] || '0') || 0;
+                rows[rowIdx][colIdx] = Math.max(0, currentVal + (op.isDelete ? -1 : 1)).toString();
+            }
+        }
+
+        await sheetService.updateValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A1`, rows);
+    });
+}
+
 /*
  * IMPORTANT: Actual Sheet Structure
  *   Row 1: (empty)
@@ -83,54 +149,10 @@ export async function processCountBatch(
     channelId: string,
     isDelete: boolean
 ): Promise<void> {
-    return locks.count.run(async () => {
-        const cfg = configService.getCountConfig();
-        if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) return;
-
-        // Map channel to column index (C=2, D=3, E=4, F=5, G=6)
-        const chMap: Record<string, number> = {
-            [cfg.CHANNELS.CHANNEL_1]: 2,
-            [cfg.CHANNELS.CHANNEL_2]: 3,
-            [cfg.CHANNELS.CHANNEL_3]: 4,
-            [cfg.CHANNELS.CHANNEL_4]: 5,
-            [cfg.CHANNELS.CHANNEL_5]: 6,
-        };
-        const colIdx = chMap[channelId];
-        if (colIdx === undefined) return;
-
-        // Read fresh data from sheet (TTL=0 = no cache)
-        const rows = await sheetService.getValues(
-            cfg.SPREADSHEET_ID,
-            `${cfg.SHEET_NAME}!A:G`,
-            0
-        );
-
-        // If sheet is too short, ensure it has at least DATA_START_ROW rows
-        while (rows.length < CONSTANTS.COUNT_DATA_START) {
-            rows.push([]);
-        }
-
-        // Ensure header row exists at row index 3 (0-based)
-        if (rows[CONSTANTS.COUNT_DATA_START - 1]?.length < 7 || !rows[CONSTANTS.COUNT_DATA_START - 1]?.[0]) {
-            rows[CONSTANTS.COUNT_DATA_START - 1] = CONSTANTS.COUNT_HEADER;
-        }
-
-        for (const p of tags) {
-            // Find or create row by exact User ID in Column B
-            const rowIdx = ensureUserRow(rows, p);
-
-            // Update count for the specific column
-            const currentVal = parseInt(rows[rowIdx][colIdx] || '0') || 0;
-            rows[rowIdx][colIdx] = Math.max(0, currentVal + (isDelete ? -1 : 1)).toString();
-        }
-
-        // Write updated data back to sheet (start from A1 to preserve empty rows 1-2)
-        await sheetService.updateValues(
-            cfg.SPREADSHEET_ID,
-            `${cfg.SHEET_NAME}!A1`,
-            rows
-        );
-    });
+    for (const tag of tags) {
+        countQueue.push({ tag, channelId, isDelete });
+    }
+    scheduleFlush();
 }
 
 /**
@@ -145,13 +167,13 @@ export async function manualRecount(client: Client, interaction: RecountInteract
             try {
                 await interaction.deferReply({ flags: 64 }).catch(silentCatch('Count'));
                 await interaction.editReply({ content: '❌ ยังไม่ได้ตั้งค่า' });
-            } catch { /* ignore */ }
+            } catch (e) { logger.warn('Count', String(e)); }
             return;
         }
 
         try {
             await interaction.deferReply({ flags: 64 }).catch(silentCatch('Count'));
-        } catch { return; }
+        } catch (e) { logger.warn('Count', `deferReply failed: ${String(e)}`); return; }
 
         // Read current sheet data
         const rows = await sheetService.getValues(
@@ -193,6 +215,8 @@ export async function manualRecount(client: Client, interaction: RecountInteract
         // Cache fetched Discord users to avoid repeated API calls
         const userCache = new Map<string, TagInfo>();
         let totalMessages = 0;
+        let lastProgressUpdate = Date.now();
+        const PROGRESS_INTERVAL_MS = 3000;
 
         for (const ch of channels) {
             if (!ch.id) continue;
@@ -208,7 +232,6 @@ export async function manualRecount(client: Client, interaction: RecountInteract
                 if (msgs.size === 0) break;
 
                 for (const msg of msgs.values()) {
-                    // Extract all unique mentioned user IDs
                     const mentions = msg.content.match(/<@!?(\d+)>/g) || [];
                     const uniqueIds = [...new Set(
                         mentions
@@ -217,7 +240,6 @@ export async function manualRecount(client: Client, interaction: RecountInteract
                     )] as string[];
 
                     for (const uid of uniqueIds) {
-                        // Fetch user info if not cached
                         if (!userCache.has(uid)) {
                             try {
                                 const user = await client.users.fetch(uid);
@@ -238,10 +260,7 @@ export async function manualRecount(client: Client, interaction: RecountInteract
                         const person = userCache.get(uid);
                         if (!person) continue;
 
-                        // Find or create row by exact User ID in Column B
                         const rowIdx = ensureUserRow(rows, person);
-
-                        // Increment count for this channel
                         const currentVal = parseInt(rows[rowIdx][ch.col] || '0') || 0;
                         rows[rowIdx][ch.col] = (currentVal + 1).toString();
                     }
@@ -250,10 +269,20 @@ export async function manualRecount(client: Client, interaction: RecountInteract
                 totalMessages += msgs.size;
                 lastId = msgs.last()?.id;
                 if (msgs.size < 100) hasMore = false;
+
+                // อัปเดตความคืบหน้าทุก 3 วิ
+                if (Date.now() - lastProgressUpdate > PROGRESS_INTERVAL_MS) {
+                    lastProgressUpdate = Date.now();
+                    try {
+                        await interaction.editReply({ content: `⏳ กำลังนับข้อความเก่า... ${totalMessages} ข้อความแล้ว` });
+                    } catch { /* ignore */ }
+                }
+
+                // ป้องกัน Discord rate limit — หน่วง 200ms ระหว่าง fetch
+                await new Promise(r => setTimeout(r, 200));
             }
         }
 
-        // Write all data back to sheet (start from A1 to preserve empty rows 1-2)
         await sheetService.updateValues(
             cfg.SPREADSHEET_ID,
             `${cfg.SHEET_NAME}!A1`,

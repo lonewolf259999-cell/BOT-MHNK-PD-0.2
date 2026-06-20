@@ -30,11 +30,8 @@ function cleanupLog(): void {
     const n = Date.now();
     if (n - lastCleanup > CACHE.COUNT_CLEANUP_INTERVAL_MS) {
         if (messageLog.size > CACHE.MESSAGE_LOG_MAX_SIZE) {
-            // ถ้าเกิน max size ให้ลบ oldest 50% ทิ้ง
             const keys = [...messageLog.keys()].slice(0, Math.floor(messageLog.size / 2));
             for (const k of keys) messageLog.delete(k);
-        } else {
-            messageLog.clear();
         }
         lastCleanup = n;
     }

@@ -64,7 +64,7 @@ export function setupRecountFeature(client: Client): void {
             if (btn.customId === 'btn_refresh_config') {
                 try { await btn.deferUpdate(); } catch { return; }
                 await configService.reload();
-                try { await btn.editReply({ embeds: [createPanelEmbed()], components: buildPanelComponents() }); } catch { /* ignore */ }
+                try { await btn.editReply({ embeds: [createPanelEmbed()], components: buildPanelComponents() }); } catch (e) { logger.warn('Recount', String(e)); }
                 return;
             }
 
@@ -111,7 +111,7 @@ export function setupRecountFeature(client: Client): void {
                 const save = async (keys: [string, string][]) => {
                     await configService.writeConfigKeys(keys);
                     if (modal.message) {
-                        try { await modal.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents() }); } catch { /* ignore */ }
+                        try { await modal.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents() }); } catch (e) { logger.warn('Recount', String(e)); }
                     }
                 };
                 switch (modal.customId) {
@@ -151,7 +151,7 @@ export function setupRecountFeature(client: Client): void {
                 }
             } catch (e: unknown) {
                 logger.error('RECOUNT', `Modal error: ${e instanceof Error ? e.message : String(e)}`);
-                try { await modal.editReply({ content: '❌ เกิดข้อผิดพลาด' }); } catch { /* ignore */ }
+                try { await modal.editReply({ content: '❌ เกิดข้อผิดพลาด' }); } catch (e) { logger.warn('Recount', String(e)); }
             }
         }
     });
@@ -162,7 +162,7 @@ async function refreshPanel(interaction: ButtonInteraction<'cached'>): Promise<v
         if (interaction.message) {
             await interaction.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents() });
         }
-    } catch { /* ignore */ }
+    } catch (e) { logger.warn('Recount', String(e)); }
 }
 
 interface ResendResult {

@@ -1,12 +1,13 @@
 /**
  * Simple Promise-based Mutex for preventing race conditions.
  * Ensures critical sections run one at a time.
+ * Only exposes run() to prevent accidental acquire() without release().
  */
 export class Mutex {
     private queue: (() => void)[] = [];
     private locked = false;
 
-    async acquire(): Promise<void> {
+    private async acquire(): Promise<void> {
         if (!this.locked) {
             this.locked = true;
             return;
@@ -16,7 +17,7 @@ export class Mutex {
         });
     }
 
-    release(): void {
+    private release(): void {
         if (this.queue.length > 0) {
             const next = this.queue.shift()!;
             next();
@@ -25,10 +26,6 @@ export class Mutex {
         }
     }
 
-    /**
-     * Run a critical section function exclusively.
-     * Automatically acquires and releases the lock.
-     */
     async run<T>(fn: () => Promise<T>): Promise<T> {
         await this.acquire();
         try {

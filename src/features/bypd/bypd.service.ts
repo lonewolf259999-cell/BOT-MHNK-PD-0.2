@@ -59,9 +59,7 @@ async function resolveTags(guild: Guild, content: string): Promise<string[]> {
             try {
                 const f = await guild.members.fetch({ query: code, limit: 10 });
                 m = f.find((mm) => (mm.nickname || '').startsWith(prefix));
-            } catch {
-                // members.fetch ล้มเหลว → ใช้ @code
-            }
+            } catch (e) { logger.warn('BYPD', String(e)); }
         }
 
         const tag = m ? `<@${m.user.id}>` : `@${code}`;
@@ -130,9 +128,9 @@ export async function processBypd(message: Message): Promise<boolean> {
 
     // 2. วนลูปทุก embed (1 embed = 1 คดี)
     for (const embed of message.embeds) {
-        if (hasBypdInEmbed(embed.toJSON())) {
-            const content = extractEmbedContent(embed.toJSON());
-            const ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, content);
+        const embedJson = embed.toJSON();
+        if (hasBypdInEmbed(embedJson)) {
+            const ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson));
             if (ok) count++;
             await sleep(1000);
         }
@@ -140,7 +138,7 @@ export async function processBypd(message: Message): Promise<boolean> {
 
     if (count > 0) {
         // ✅ reaction แรก = บอกว่าระบบ process แล้ว (สำหรับระบบส่งย้อนหลัง)
-        try { await message.react('✅'); } catch { /* ignore */ }
+        try { await message.react('✅'); } catch (e) { logger.warn('BYPD', String(e)); }
 
         // อิโมจิที่ 2 = บอกจำนวนคดี (ถ้ามากกว่า 1)
         if (count > 1) {
@@ -150,7 +148,7 @@ export async function processBypd(message: Message): Promise<boolean> {
             };
             const emoji = emojiMap[count];
             if (emoji) {
-                try { await message.react(emoji); } catch { /* ignore */ }
+                try { await message.react(emoji); } catch (e) { logger.warn('BYPD', String(e)); }
             }
         }
         logger.info('BYPD', `ส่ง ${count} คดี จากข้อความ ${message.id}`);

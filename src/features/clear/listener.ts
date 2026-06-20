@@ -1,5 +1,6 @@
 import { Client, Events, MessageFlags, ChatInputCommandInteraction } from 'discord.js';
 import { replyAndDelete } from '../../services/utils';
+import { logger } from '../../core/logger';
 
 export function setupClearFeature(client: Client): void {
     client.on(Events.InteractionCreate, async (i) => {
@@ -41,7 +42,7 @@ export function setupClearFeature(client: Client): void {
             if (totalDeleted > 0) {
                 try {
                     await cmd.editReply({ content: `⚠️ ลบได้ ${totalDeleted}/${amount} ข้อความ แล้วพบข้อผิดพลาด: ${err instanceof Error ? err.message : String(err)}` });
-                } catch { /* ignore */ }
+                } catch (e) { logger.warn('Clear', String(e)); }
                 return;
             }
             await cmd.editReply({ content: `❌ ไม่สามารถลบข้อความได้: ${err instanceof Error ? err.message : String(err)}` });

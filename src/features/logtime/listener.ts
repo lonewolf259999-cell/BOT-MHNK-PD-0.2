@@ -54,12 +54,60 @@ interface LogtimeInfo {
     id: string | null;
 }
 
+const LOGTIME_PATTERNS = [
+    /รายงาน(?:ตัว)?(?:เข้าเวร|เข้างาน|ปฏิบัติหน้าที่)ของ\s*[-–—]\s*(.+)/i,
+    /ชื่อ\s*[-–—]\s*(.+)/i,
+    /รายงานตัว\s*(.+)/i,
+];
+
+const IN_PATTERNS = [
+    /เวลาเข้างาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i,
+    /เข้างาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i,
+    /เวลาเริ่ม[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i,
+];
+
+const OUT_PATTERNS = [
+    /เวลาออกงาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i,
+    /ออกงาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i,
+    /เวลาเลิก[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i,
+];
+
+const DURATION_PATTERNS = [
+    /ระยะเวลาที่เข้าเวร\s*\n?\s*(\d{2}:\d{2}:\d{2})/i,
+    /ระยะเวลา[\s\S]*?(\d{2}:\d{2}:\d{2})/i,
+    /รวมเวลา[\s\S]*?(\d{2}:\d{2}:\d{2})/i,
+];
+
+const STEAM_PATTERNS = [
+    /(steam:\w+)/i,
+    /(STEAM_\d:\d:\d+)/i,
+];
+
+function firstMatch(text: string, patterns: RegExp[]): RegExpMatchArray | null {
+    for (const p of patterns) {
+        const m = text.match(p);
+        if (m) return m;
+    }
+    return null;
+}
+
 function extractInfo(text: string): LogtimeInfo {
     const c = text.replace(/`/g, '').replace(/\*/g, '').replace(/\u200B/g, '');
-    const name = (c.match(/รายงานเข้าเวรของ\s*[-–—]\s*(.+)/i) || [])[1]?.trim() || null;
-    const inMatch = c.match(/เวลาเข้างาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i);
-    const outMatch = c.match(/เวลาออกงาน[\s\S]*?(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/i);
-    const duration = (c.match(/ระยะเวลาที่เข้าเวร\s*\n?\s*(\d{2}:\d{2}:\d{2})/i) || [])[1] || null;
+    const nameMatch = firstMatch(c, LOGTIME_PATTERNS);
+    const name = nameMatch?.[1]?.trim() || null;
+    const inMatch = firstMatch(c, IN_PATTERNS);
+    const outMatch = firstMatch(c, OUT_PATTERNS);
+    const durMatch = firstMatch(c, DURATION_PATTERNS);
+    const steamMatch = firstMatch(c, STEAM_PATTERNS);
+    const duration = durMatch?.[1] || null;
+
+    if (!name) {
+        logger.warn('ลงเวลา', 'ไม่พบชื่อในข้อความ — อาจเปลี่ยนรูปแบบข้อความแล้ว');
+    }
+    if (!outMatch && !inMatch) {
+        logger.warn('ลงเวลา', 'ไม่พบข้อมูลเวลาเข้า/ออกงาน — อาจเปลี่ยนรูปแบบข้อความแล้ว');
+    }
+
     return {
         name,
         inDate: inMatch ? inMatch[1] : null,
@@ -67,6 +115,6 @@ function extractInfo(text: string): LogtimeInfo {
         date: outMatch?.[1] || null,
         time: outMatch?.[2] || null,
         duration,
-        id: (c.match(/(steam:\w+)/i) || [])[1] || null,
+        id: steamMatch?.[1] || null,
     };
 }

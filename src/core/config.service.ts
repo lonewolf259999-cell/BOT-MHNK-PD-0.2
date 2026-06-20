@@ -50,7 +50,6 @@ export class ConfigService {
 
     async reload(): Promise<void> { this.loaded = false; return this.load(true); }
     isLoaded(): boolean { return this.loaded; }
-    getRaw(key: string): string { return this.data[key] || ''; }
     getCountConfig() { return this.countConfig; }
     getRegistryConfig() { return this.registryConfig; }
     getWelcomeChannelId(): string { return this.welcomeChannelId; }

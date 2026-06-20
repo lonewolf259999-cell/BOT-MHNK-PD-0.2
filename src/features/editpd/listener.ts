@@ -66,7 +66,7 @@ export function setupEditPdFeature(client: Client): void {
                     if (info) {
                         const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
                         await updateMemberName(info.row, full);
-                        try { await modal.member.setNickname(truncateNickname(full)); } catch { /* ignore */ }
+                        try { await modal.member.setNickname(truncateNickname(full)); } catch (e) { logger.warn('EditPD', String(e)); }
                         changed.push(`ชื่อ IC → **${newName}**`);
                     }
                 }
