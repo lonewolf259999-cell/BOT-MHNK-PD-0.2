@@ -1,4 +1,4 @@
-import { Client, Events, Message, Guild, GuildMember, MessageFlags } from 'discord.js';
+import { Client, Events, Guild } from 'discord.js';
 import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { processCountBatch } from './count.service';
@@ -85,7 +85,7 @@ export function setupCountFeature(client: Client): void {
     setInterval(cleanupLog, CACHE.COUNT_CLEANUP_INTERVAL_MS);
     cleanupLog(); // เรียกครั้งแรกตอน start
 
-    client.on(Events.MessageUpdate, async (oldM, newM) => {
+    client.on(Events.MessageUpdate, async (_oldM, newM) => {
         try {
             const cfg = configService.getCountConfig();
             if (!configService.isLoaded() || !cfg.CHANNELS || !newM.guild || !newM.channel) return;

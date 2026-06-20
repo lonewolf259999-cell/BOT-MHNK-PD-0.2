@@ -1,4 +1,4 @@
-import { Client, CommandInteraction, ButtonInteraction, GuildMember } from 'discord.js';
+import { Client, CommandInteraction, ButtonInteraction } from 'discord.js';
 import { sheetService } from '../../core/sheet.service';
 import { configService } from '../../core/config.service';
 import { normalizeName, replyAndDelete, silentCatch } from '../../services/utils';

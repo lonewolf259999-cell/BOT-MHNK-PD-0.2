@@ -2,6 +2,7 @@ import { EmbedBuilder, Message, Guild, GuildTextBasedChannel } from 'discord.js'
 import type { APIEmbed } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
+import { locks } from '../../core/lock.service';
 import { sleep } from '../../services/utils';
 import { hasBypdInEmbed } from './bypd.utils';
 
@@ -12,23 +13,16 @@ const processedMessages = new Set<string>();
 const tagCache = new Map<string, { tag: string; expires: number }>();
 
 /** Queue: ส่งทีละ 1 รายงาน ป้องกัน Discord rate limit */
-let activeSends = 0;
-const MAX_CONCURRENT = 1;
-
 async function sendWithQueue(ch: GuildTextBasedChannel, guild: Guild, content: string): Promise<boolean> {
-    while (activeSends >= MAX_CONCURRENT) {
-        await sleep(200);
-    }
-    activeSends++;
-    try {
-        await sendBypdReport(ch, guild, content);
-        return true;
-    } catch (err: unknown) {
-        logger.error('BYPD', `ส่งรายงานล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
-        return false;
-    } finally {
-        activeSends--;
-    }
+    return locks.bypdSend.run(async () => {
+        try {
+            await sendBypdReport(ch, guild, content);
+            return true;
+        } catch (err: unknown) {
+            logger.error('BYPD', `ส่งรายงานล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
+            return false;
+        }
+    });
 }
 
 /** ดึงข้อความจาก embed เดียว */

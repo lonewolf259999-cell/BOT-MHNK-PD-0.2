@@ -171,7 +171,7 @@ interface ResendResult {
     message: string;
 }
 
-async function runResendMissed(client: Client, interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal): Promise<ResendResult> {
+async function runResendMissed(_client: Client, interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal): Promise<ResendResult> {
     const logChannelId = configService.getLogCaseChannelId();
     const guild = interaction.guild;
     if (!logChannelId || !guild) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
