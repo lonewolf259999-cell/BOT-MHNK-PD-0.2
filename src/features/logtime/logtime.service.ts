@@ -31,21 +31,21 @@ type FindResult =
     | { action: 'create_new'; row: number };
 
 /** Convert "HH:mm:ss" to total minutes */
-function timeToMinutes(durationStr: string): number {
+export function timeToMinutes(durationStr: string): number {
     if (!durationStr) return 0;
     const [hrs, mins, secs] = durationStr.split(':').map(Number);
     return hrs * 60 + mins + Math.round(secs / 60);
 }
 
 /** Convert total minutes to "HH:mm" */
-function minutesToHHmm(totalMinutes: number): string {
+export function minutesToHHmm(totalMinutes: number): string {
     const hrs = Math.floor(totalMinutes / 60);
     const mins = Math.round(totalMinutes % 60);
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 }
 
 /** Map a date string (DD/MM/YYYY) to column O-U based on day of week */
-function getColumnByDate(dateStr: string): string | null {
+export function getColumnByDate(dateStr: string): string | null {
     if (!dateStr) return null;
     const [d, m, y] = dateStr.split('/').map(Number);
     const dateObj = new Date(y, m - 1, d);
@@ -63,7 +63,7 @@ function getColumnByDate(dateStr: string): string | null {
  *   - X+Y skip check
  *   - First empty X row → newRowCandidate
  */
-function findRow(rows: string[][], name: string, steamId?: string): FindResult {
+export function findRow(rows: string[][], name: string, steamId?: string): FindResult {
     const n = normalizeName(name);
     const s = steamId ? normalizeName(steamId) : undefined;
 
@@ -129,11 +129,9 @@ function findRow(rows: string[][], name: string, steamId?: string): FindResult {
         }
     }
 
-    // Return best match found
+    // Return best match found (name match = update_time_steam)
     if (bestCandidate) {
-        return bestCandidate.priority <= 1
-            ? { action: 'update_time', row: bestCandidate.row }
-            : { action: 'update_time_steam', row: bestCandidate.row };
+        return { action: 'update_time_steam', row: bestCandidate.row };
     }
 
     // Create new entry at first empty X row or end

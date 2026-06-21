@@ -44,7 +44,7 @@ function buildMessageText(msg: Message): string {
     return lines.filter(Boolean).join('\n');
 }
 
-interface LogtimeInfo {
+export interface LogtimeInfo {
     name: string | null;
     inDate: string | null;
     inTime: string | null;
@@ -91,7 +91,7 @@ function firstMatch(text: string, patterns: RegExp[]): RegExpMatchArray | null {
     return null;
 }
 
-function extractInfo(text: string): LogtimeInfo {
+export function extractInfo(text: string): LogtimeInfo {
     const c = text.replace(/`/g, '').replace(/\*/g, '').replace(/\u200B/g, '');
     const nameMatch = firstMatch(c, LOGTIME_PATTERNS);
     const name = nameMatch?.[1]?.trim() || null;

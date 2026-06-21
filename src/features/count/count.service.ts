@@ -88,7 +88,7 @@ async function flushCountQueue(): Promise<void> {
  * Find row index by exact Discord User ID match in Column B (index 1).
  * Only searches data rows (index 3+).
  */
-function findRowById(rows: string[][], userId: string): number {
+export function findRowById(rows: string[][], userId: string): number {
     for (let i = CONSTANTS.COUNT_DATA_START; i < rows.length; i++) {
         if (rows[i]?.length > 1 && rows[i][1] === userId) return i;
     }
@@ -126,7 +126,7 @@ function findRowByName(rows: string[][], tag: TagInfo): number {
  * 
  * Sheet format: [A=displayName, B=UserID, C=Take2, D=คดีปกติ, E=รถยอด, F=คุมสอบ, G=อุ้มเอ๋อ]
  */
-function ensureUserRow(rows: string[][], tag: TagInfo): number {
+export function ensureUserRow(rows: string[][], tag: TagInfo): number {
     // Priority 1: Exact User ID match in Column B
     let idx = findRowById(rows, tag.id);
     if (idx !== -1) return idx;
