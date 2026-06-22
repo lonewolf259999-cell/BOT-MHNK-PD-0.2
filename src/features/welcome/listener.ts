@@ -143,6 +143,13 @@ export function setupWelcomeFeature(client: Client): void {
 
     client.on(Events.GuildMemberRemove, async (member) => {
         try {
+            // ✅ ตรวจสอบก่อนว่าออกจาก Discord จริงหรือไม่ (ป้องกัน event ปลอม)
+            const stillInGuild = await member.guild.members.fetch(member.user.id).catch(() => null);
+            if (stillInGuild) {
+                logger.warn('ต้อนรับ', `⚠️ FALSE GuildMemberRemove — ${member.user.tag} ยังอยู่ในเซิร์ฟ ไม่ย้ายออก`);
+                return;
+            }
+
             await moveMemberToOut(member.user.id);
             const ch = getTextChannel(member.guild, configService.getWelcomeChannelId());
             if (!ch) return;
