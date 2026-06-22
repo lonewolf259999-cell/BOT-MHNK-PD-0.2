@@ -56,19 +56,19 @@ describe('findRow', () => {
     it('ควรเจอโดย Steam ID ก่อน (M column) — update_time', () => {
         const result = findRow(mockRows, 'Alice', 'steam:alice');
         expect(result.action).toBe('update_time');
-        expect(result.row).toBe(4);
+        if (result.action === 'update_time') expect(result.row).toBe(4);
     });
 
     it('ควรเจอโดยชื่อ (D column, M ว่าง) — update_time_steam', () => {
         const result = findRow(mockRows, 'John');
         expect(result.action).toBe('update_time_steam');
-        expect(result.row).toBe(3);
+        if (result.action === 'update_time_steam') expect(result.row).toBe(3);
     });
 
     it('ควรเจอโดยชื่อแม้ไม่ส่ง Steam ID', () => {
         const result = findRow(mockRows, 'Bob');
         expect(result.action).toBe('update_time_steam');
-        expect(result.row).toBe(5);
+        if (result.action === 'update_time_steam') expect(result.row).toBe(5);
     });
 
     it('ควร skip ถ้าเจอใน X+Y', () => {
@@ -79,7 +79,7 @@ describe('findRow', () => {
     it('ควร create_new ถ้าไม่เจอใน D หรือ M หรือ X+Y', () => {
         const result = findRow(mockRows, 'NewPerson', 'steam:new');
         expect(result.action).toBe('create_new');
-        expect(result.row).toBeGreaterThan(0);
+        if (result.action === 'create_new') expect(result.row).toBeGreaterThan(0);
     });
 
     it('ควร match ชื่อแบบย้อนกลับ (backward match)', () => {
@@ -90,6 +90,6 @@ describe('findRow', () => {
         ];
         const result = findRow(shortRows, 'John');
         expect(result.action).toBe('update_time_steam');
-        expect(result.row).toBe(3);
+        if (result.action === 'update_time_steam') expect(result.row).toBe(3);
     });
 });
