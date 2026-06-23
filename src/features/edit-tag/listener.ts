@@ -22,6 +22,7 @@ import { rateLimiter } from '../../core/ratelimiter';
 import { logger } from '../../core/logger';
 import { PermissionService } from '../../services/permission.service';
 import { silentCatch } from '../../services/utils';
+import { configService } from '../../core/config.service';
 
 type CachedInteraction = MessageContextMenuCommandInteraction<'cached'>;
 
@@ -39,6 +40,31 @@ async function fetchMsg(client: Client, channelId: string, messageId: string): P
  */
 function extractMentionIds(content: string): string[] {
     return [...new Set((content.match(/<@!?(\d+)>/g) || []).map((m: string) => m.match(/\d+/)?.[0]).filter(Boolean))] as string[];
+}
+
+async function sendEditTagLog(client: Client, guildId: string, channelId: string, messageId: string, userId: string, action: 'add' | 'remove', targetIds: string[]): Promise<void> {
+    try {
+        const logChannelId = configService.getEditTagLogChannelId();
+        if (!logChannelId) { logger.warn('EditTagLog', 'ไม่มี EDIT_TAG_LOG_CHANNEL_ID'); return; }
+        logger.info('EditTagLog', `พยายามส่ง log ไปยัง ${logChannelId}`);
+        const ch = await client.channels.fetch(logChannelId);
+        if (!ch?.isTextBased()) { logger.warn('EditTagLog', `แชนแนล ${logChannelId} ไม่ใช่ text channel`); return; }
+        const jumpUrl = `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+        const label = action === 'add' ? '➕ เพิ่ม' : '➖ ลบ';
+        const embed = new EmbedBuilder()
+            .setTitle('📝 แก้ไขแท็กคดี')
+            .setColor(action === 'add' ? 0x22c55e : 0xef4444)
+            .addFields(
+                { name: '👤 ผู้แก้ไข', value: `<@${userId}> (\`${userId}\`)`, inline: true },
+                { name: label, value: targetIds.map(id => `<@${id}>`).join(' ') || '-', inline: false },
+                { name: '🔗 ข้อความ', value: `[Jump to message](${jumpUrl})` },
+            )
+            .setTimestamp();
+        await (ch as TextChannel).send({ embeds: [embed] });
+        logger.info('EditTagLog', 'ส่ง log สำเร็จ');
+    } catch (err) {
+        logger.error('EditTagLog', `ส่ง log ล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
+    }
 }
 
 export function setupEditTagFeature(client: Client): void {
@@ -169,6 +195,9 @@ export function setupEditTagFeature(client: Client): void {
                 }
                 await msg.edit(c);
                 await sel.editReply({ content: `✅ เพิ่ม ${added} คนสำเร็จ`, components: [] });
+                if (added > 0) {
+                    await sendEditTagLog(client, sel.guildId, p[3], p[2], sel.user.id, 'add', sel.values);
+                }
                 setTimeout(() => sel.deleteReply().catch(silentCatch('EditTag')), 3000);
                 return;
             }
@@ -236,6 +265,7 @@ export function setupEditTagFeature(client: Client): void {
                 c = c.replace(/\s+/g, ' ').trim();
                 await msg.edit(c);
                 await sel.editReply({ content: `✅ ลบ ${sel.values.length} คนสำเร็จ`, components: [] });
+                await sendEditTagLog(client, sel.guildId, p[3], p[2], sel.user.id, 'remove', sel.values);
                 setTimeout(() => sel.deleteReply().catch(silentCatch('EditTag')), 3000);
                 return;
             }

@@ -15,6 +15,7 @@ export class ConfigService {
     private logCaseChannelId = '';
     private bypdSendChannelId = '';
     private editTagMode = '';
+    private editTagLogChannelId = '';
     private exemptRoles: string[] = [];
     private thirtyDayRoleId = '';
     private dayThreshold = 30;
@@ -35,6 +36,7 @@ export class ConfigService {
             this.logCaseChannelId = this.data.LOGCASE_CHANNEL_ID || '';
             this.bypdSendChannelId = this.data.BYPD_SEND_CHANNEL_ID || '';
             this.editTagMode = this.data.EDIT_TAG_MODE || '';
+            this.editTagLogChannelId = this.data.EDIT_TAG_LOG_CHANNEL_ID || '';
             const exemptRaw = this.data.EXEMPT_ROLES || '1507105753461424198,1507570062649983027,1507107833890738347';
             this.exemptRoles = exemptRaw.split(',').map(s => s.trim()).filter(Boolean);
             this.thirtyDayRoleId = this.data.THIRTY_DAY_ROLE_ID || '1509659434681635096';
@@ -60,6 +62,7 @@ export class ConfigService {
     getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
     getPendingSheetName(): string { return this.pendingSheetName; }
     getEditTagMode(): string { return this.editTagMode; }
+    getEditTagLogChannelId(): string { return this.editTagLogChannelId; }
     getExemptRoles(): string[] { return this.exemptRoles; }
     getThirtyDayRoleId(): string { return this.thirtyDayRoleId; }
     getDayThreshold(): number { return this.dayThreshold; }
