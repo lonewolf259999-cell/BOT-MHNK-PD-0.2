@@ -14,6 +14,7 @@ export class ConfigService {
     private logtimeChannelId = '';
     private logCaseChannelId = '';
     private bypdSendChannelId = '';
+    private proctorSendChannelId = '';
     private editTagMode = '';
     private editTagLogChannelId = '';
     private exemptRoles: string[] = [];
@@ -35,6 +36,7 @@ export class ConfigService {
             this.logtimeChannelId = this.data.LOGTIME_CHANNEL_ID || '';
             this.logCaseChannelId = this.data.LOGCASE_CHANNEL_ID || '';
             this.bypdSendChannelId = this.data.BYPD_SEND_CHANNEL_ID || '';
+            this.proctorSendChannelId = this.data.PROCTOR_SEND_CHANNEL_ID || '';
             this.editTagMode = this.data.EDIT_TAG_MODE || '';
             this.editTagLogChannelId = this.data.EDIT_TAG_LOG_CHANNEL_ID || '';
             const exemptRaw = this.data.EXEMPT_ROLES || '1507105753461424198,1507570062649983027,1507107833890738347';
@@ -59,6 +61,7 @@ export class ConfigService {
     getLogtimeChannelId(): string { return this.logtimeChannelId; }
     getLogCaseChannelId(): string { return this.logCaseChannelId; }
     getBypdSendChannelId(): string { return this.bypdSendChannelId; }
+    getProctorSendChannelId(): string { return this.proctorSendChannelId; }
     getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
     getPendingSheetName(): string { return this.pendingSheetName; }
     getEditTagMode(): string { return this.editTagMode; }

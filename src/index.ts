@@ -152,6 +152,7 @@ async function start(): Promise<void> {
         (await import('./features/editpd/listener')).setupEditPdFeature,
         (await import('./features/recount/listener')).setupRecountFeature,
         (await import('./features/clear/listener')).setupClearFeature,
+        (await import('./features/proctor/listener')).setupProctorFeature,
     ];
 
     for (const setupFn of featureSetups) {
