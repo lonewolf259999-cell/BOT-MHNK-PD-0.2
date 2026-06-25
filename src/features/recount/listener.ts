@@ -8,6 +8,8 @@ import { logger } from '../../core/logger';
 import { resendStates } from './resend.state';
 import { processBypd } from '../bypd/bypd.service';
 import { hasBypdInMessage } from '../bypd/bypd.utils';
+import { processProctor } from '../proctor/proctor.service';
+import { hasProctorInMessage } from '../proctor/proctor.utils';
 
 const PANEL_IDS = new Set([
     'btn_recount_manual', 'btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_registry',
@@ -179,6 +181,7 @@ async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSi
     const logChannel = guild.channels.cache.get(logChannelId);
     if (!logChannel || !logChannel.isTextBased()) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
     let scanned = 0, bypdSent = 0, failed = 0, bypdAlready = 0;
+    let proctorSent = 0, proctorAlready = 0;
     let lastId: string | undefined;
     while (true) {
         if (abortSignal.aborted) break;
@@ -187,12 +190,21 @@ async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSi
         const batch = [...messages.values()].reverse();
         for (const msg of batch) {
             const hasBypd = hasBypdInMessage(msg);
+            const hasProctor = hasProctorInMessage(msg);
             const hasCheck = msg.reactions.cache.some((r) => r.emoji.name === '✅');
+
             if (hasBypd && !hasCheck) {
                 try { await processBypd(msg); bypdSent++; } catch { failed++; }
                 await new Promise(r => setTimeout(r, 500));
             } else if (hasBypd && hasCheck) {
                 bypdAlready++;
+            }
+
+            if (hasProctor && !hasCheck) {
+                try { await processProctor(msg); proctorSent++; } catch { failed++; }
+                await new Promise(r => setTimeout(r, 500));
+            } else if (hasProctor && hasCheck) {
+                proctorAlready++;
             }
         }
         scanned += batch.length;
@@ -202,7 +214,7 @@ async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSi
         sent: bypdSent,
         failed,
         message: abortSignal.aborted
-            ? `⏹️ หยุดส่งย้อนหลังแล้ว\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | ❌ ${failed}\n📊 เคยส่งแล้ว: BYPD ${bypdAlready}`
-            : `✅ ส่งย้อนหลังเสร็จสิ้น\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | ❌ ${failed}\n📊 เคยส่งแล้ว: BYPD ${bypdAlready}`,
+            ? `⏹️ หยุดส่งย้อนหลังแล้ว\n📊 สแกน: ${scanned}\n📊 BYPD: ${bypdSent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยแล้ว: BYPD ${bypdAlready} | Proctor ${proctorAlready}`
+            : `✅ ส่งย้อนหลังเสร็จสิ้น\n📊 สแกน: ${scanned}\n📊 BYPD: ${bypdSent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยแล้ว: BYPD ${bypdAlready} | Proctor ${proctorAlready}`,
     };
 }
