@@ -7,7 +7,7 @@ import { buildCountModal, buildWelcomeModal, buildBypdModal, buildRegistryModal 
 import { logger } from '../../core/logger';
 import { resendStates } from './resend.state';
 import { processBypd } from '../bypd/bypd.service';
-import { hasBypdInMessage } from '../bypd/bypd.utils';
+import { hasBypdOrPdInMessage } from '../bypd/bypd.utils';
 import { processProctor } from '../proctor/proctor.service';
 import { hasProctorInMessage } from '../proctor/proctor.utils';
 
@@ -189,7 +189,7 @@ async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSi
         if (messages.size === 0) break;
         const batch = [...messages.values()].reverse();
         for (const msg of batch) {
-            const hasBypd = hasBypdInMessage(msg);
+            const hasBypd = hasBypdOrPdInMessage(msg);
             const hasProctor = hasProctorInMessage(msg);
             const hasCheck = msg.reactions.cache.some((r) => r.emoji.name === '✅');
 
