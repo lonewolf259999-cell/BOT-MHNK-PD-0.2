@@ -4,7 +4,7 @@ import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import { sleep } from '../../services/utils';
-import { hasBypdInEmbed } from './bypd.utils';
+import { hasBypdInEmbed, hasPdInEmbed, hasBypdOrPdInMessage } from './bypd.utils';
 
 /** กัน process message ซ้ำ (message.id เดียว) */
 const processedMessages = new Set<string>();
@@ -36,22 +36,28 @@ function extractEmbedContent(embed: APIEmbed): string {
 }
 
 async function resolveTags(guild: Guild, content: string): Promise<string[]> {
-    const match = content.match(/(?:BYPD)\s+((?:\d{2,3}\s*)+)/i);
-    const codes = match ? match[1].trim().split(/\s+/) : [];
     const tags: string[] = [];
     const now = Date.now();
 
-    for (const code of codes) {
+    // 1. ดึงรหัส BYPD ก่อน
+    const bypdMatch = content.match(/(?:BYPD)\s+((?:\d{2,3}\s*)+)/i);
+    const bypdCodes = bypdMatch ? bypdMatch[1].trim().split(/\s+/) : [];
+
+    // 2. ดึงรหัส PD
+    const pdMatch = content.match(/(?:PD)\s+((?:\d{2,3}\s*)+)/i);
+    const pdCodes = pdMatch ? pdMatch[1].trim().split(/\s+/) : [];
+
+    // รวม BYPD ก่อน แล้วค่อย PD
+    const allCodes = [...bypdCodes, ...pdCodes];
+
+    const resolveOne = async (code: string): Promise<string> => {
         const prefix = `${code} [MHNK-PD]`;
 
         // 1. เช็ค cache ก่อน
         const cached = tagCache.get(code);
-        if (cached && now < cached.expires) {
-            tags.push(cached.tag);
-            continue;
-        }
+        if (cached && now < cached.expires) return cached.tag;
 
-        // 2. หาจาก members.cache (ไม่มี API call)
+        // 2. หาจาก members.cache
         let m = guild.members.cache.find((mm) => (mm.nickname || '').startsWith(prefix));
 
         // 3. ถ้าไม่เจอ → เรียก API
@@ -64,7 +70,11 @@ async function resolveTags(guild: Guild, content: string): Promise<string[]> {
 
         const tag = m ? `<@${m.user.id}>` : `@${code}`;
         tagCache.set(code, { tag, expires: now + 60000 });
-        tags.push(tag);
+        return tag;
+    };
+
+    for (const code of allCodes) {
+        tags.push(await resolveOne(code));
     }
     return tags;
 }
@@ -120,7 +130,7 @@ export async function processBypd(message: Message): Promise<boolean> {
     let count = 0;
 
     // 1. เช็ค message.content
-    if (message.content?.trim() && message.content.toUpperCase().includes('BYPD')) {
+    if (message.content?.trim() && hasBypdOrPdInMessage(message)) {
         const ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, message.content.trim());
         if (ok) count++;
         await sleep(1000);
@@ -129,7 +139,7 @@ export async function processBypd(message: Message): Promise<boolean> {
     // 2. วนลูปทุก embed (1 embed = 1 คดี)
     for (const embed of message.embeds) {
         const embedJson = embed.toJSON();
-        if (hasBypdInEmbed(embedJson)) {
+        if (hasBypdInEmbed(embedJson) || hasPdInEmbed(embedJson)) {
             const ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson));
             if (ok) count++;
             await sleep(1000);
