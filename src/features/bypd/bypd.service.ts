@@ -47,8 +47,8 @@ async function resolveTags(guild: Guild, content: string): Promise<string[]> {
     const pdMatch = content.match(/(?:PD)\s+((?:\d{2,3}\s*)+)/i);
     const pdCodes = pdMatch ? pdMatch[1].trim().split(/\s+/) : [];
 
-    // รวม BYPD ก่อน แล้วค่อย PD
-    const allCodes = [...bypdCodes, ...pdCodes];
+    // รวม BYPD ก่อน แล้วค่อย PD (ตัดรหัสซ้ำด้วย Set)
+    const allCodes = [...new Set([...bypdCodes, ...pdCodes])];
 
     const resolveOne = async (code: string): Promise<string> => {
         const prefix = `${code} [MHNK-PD]`;
