@@ -7,7 +7,6 @@ import { CACHE } from '../../config';
 import type { TagInfo } from '../../types/discord';
 
 const messageLog = new Map<string, TagInfo[]>();
-let lastCleanup = Date.now();
 
 function getTagsFromMessage(content: string, guild: Guild): TagInfo[] {
     const tags: TagInfo[] = [];
@@ -27,13 +26,9 @@ function getTagsFromMessage(content: string, guild: Guild): TagInfo[] {
 }
 
 function cleanupLog(): void {
-    const n = Date.now();
-    if (n - lastCleanup > CACHE.COUNT_CLEANUP_INTERVAL_MS) {
-        if (messageLog.size > CACHE.MESSAGE_LOG_MAX_SIZE) {
-            const keys = [...messageLog.keys()].slice(0, Math.floor(messageLog.size / 2));
-            for (const k of keys) messageLog.delete(k);
-        }
-        lastCleanup = n;
+    if (messageLog.size > CACHE.MESSAGE_LOG_MAX_SIZE) {
+        const keys = [...messageLog.keys()].slice(0, Math.floor(messageLog.size / 2));
+        for (const k of keys) messageLog.delete(k);
     }
 }
 
@@ -58,6 +53,7 @@ export function setupCountFeature(client: Client): void {
             await message.react('✅').catch(silentCatch('Count'));
             if (messageLog.has(message.id)) return;
             messageLog.set(message.id, tags);
+            cleanupLog();
             await processCountBatch(tags, message.channel.id, false);
         } catch (e: unknown) {
             logger.error('นับเคส', `MessageCreate: ${e instanceof Error ? e.message : String(e)}`);

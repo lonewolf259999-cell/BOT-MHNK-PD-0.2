@@ -3,6 +3,7 @@ import { configService } from '../../core/config.service';
 import { extractUserId, sleep, silentCatch } from '../../services/utils';
 import { stripPrefix } from '../../services/member.service';
 import { moveToOutDC } from '../welcome/welcome.service';
+import { sheetService } from '../../core/sheet.service';
 import { logger } from '../../core/logger';
 
 export function setupThirtyDayFeature(client: Client): void {
@@ -26,7 +27,6 @@ export function setupThirtyDayFeature(client: Client): void {
             const thirtyDayRoleId = configService.getThirtyDayRoleId();
             const dayThreshold = configService.getDayThreshold();
 
-            const { sheetService } = await import('../../core/sheet.service');
             const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!A:M`, 0);
             const dayIdx = 11; // Column L = index 11
             const done: string[] = [];

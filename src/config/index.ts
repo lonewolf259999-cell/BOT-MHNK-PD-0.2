@@ -24,7 +24,7 @@ export const CACHE = {
     SHEET_TTL: 5000,        // 5 seconds for sheet reads
     RATE_LIMITER_CLEANUP_INTERVAL_MS: 5 * 60 * 1000, // Cleanup rate limiter every 5 min
     COUNT_CLEANUP_INTERVAL_MS: 24 * 60 * 60 * 1000, // Cleanup message log every 24h
-    MESSAGE_LOG_MAX_SIZE: 2000, // Max entries in messageLog before pruning
+    MESSAGE_LOG_MAX_SIZE: 200, // Max entries in messageLog before pruning
 };
 
 // ---- Bot Config ----
