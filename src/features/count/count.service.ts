@@ -65,7 +65,8 @@ async function flushCountQueue(): Promise<void> {
             for (const op of channelOps) {
                 const rowIdx = ensureUserRow(rows, op.tag);
                 const currentVal = parseInt(rows[rowIdx][colIdx] || '0') || 0;
-                rows[rowIdx][colIdx] = Math.max(0, currentVal + (op.isDelete ? -1 : 1)).toString();
+                const newVal = currentVal + (op.isDelete ? -1 : 1);
+                rows[rowIdx][colIdx] = newVal > 0 ? newVal.toString() : '';
             }
         }
 
@@ -139,8 +140,8 @@ export function ensureUserRow(rows: string[][], tag: TagInfo): number {
         return idx;
     }
 
-    // Priority 3: Create new row [displayName, UserID, 0,0,0,0,0]
-    rows.push([tag.nickname || tag.username, tag.id, '0', '0', '0', '0', '0']);
+    // Priority 3: Create new row [displayName, UserID, '', '', '', '', '']
+    rows.push([tag.nickname || tag.username, tag.id, '', '', '', '', '']);
     return rows.length - 1;
 }
 
@@ -197,9 +198,9 @@ export async function manualRecount(client: Client, interaction: RecountInteract
             if (rows[i]) {
                 // Ensure row has enough columns (at least 7: A-G)
                 while (rows[i].length < 7) rows[i].push('0');
-                // Reset count columns C-G to 0
+                // Reset count columns C-G to empty
                 for (let c = 2; c <= 6; c++) {
-                    rows[i][c] = '0';
+                    rows[i][c] = '';
                 }
             }
         }
