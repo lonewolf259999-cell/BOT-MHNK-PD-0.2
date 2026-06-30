@@ -44,14 +44,14 @@ describe('findRowById', () => {
 
 describe('ensureUserRow', () => {
     it('ควรเจอแถวที่มี User ID ตรง', () => {
-        const rows = JSON.parse(JSON.stringify(existingRows)) as string[][];
+        const rows = structuredClone(existingRows) as string[][];
         const tag: TagInfo = { id: '111', nickname: 'John', username: 'john_usr' };
         const idx = ensureUserRow(rows, tag);
         expect(idx).toBe(3);
     });
 
     it('ควรเจอแถวโดยชื่อ (backward compat) และใส่ User ID ให้', () => {
-        const rows = JSON.parse(JSON.stringify(legacyRows)) as string[][];
+        const rows = structuredClone(legacyRows) as string[][];
         const tag: TagInfo = { id: '111', nickname: 'John', username: 'john_usr' };
         const idx = ensureUserRow(rows, tag);
         expect(idx).toBe(3);
@@ -59,7 +59,7 @@ describe('ensureUserRow', () => {
     });
 
     it('ควรสร้างแถวใหม่ถ้าไม่เจอ', () => {
-        const rows = JSON.parse(JSON.stringify(headerOnlyRows)) as string[][];
+        const rows = structuredClone(headerOnlyRows) as string[][];
         const tag: TagInfo = { id: '333', nickname: 'NewPerson', username: 'new_usr' };
         const idx = ensureUserRow(rows, tag);
         expect(idx).toBe(3);

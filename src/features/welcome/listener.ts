@@ -1,7 +1,6 @@
 import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, type ColorResolvable, Interaction, ButtonInteraction } from 'discord.js';
 import { configService } from '../../core/config.service';
-import { sheetService } from '../../core/sheet.service';
-import { registerMember, moveMemberToOut, checkPreApproved, checkInOutDc, isAlreadyRegistered } from './welcome.service';
+import { registerMember, moveMemberToOut, checkPreApproved, checkPendingStatus, checkInOutDc, isAlreadyRegistered } from './welcome.service';
 import { getTextChannel } from '../../services/utils';
 import { logger } from '../../core/logger';
 
@@ -237,22 +236,3 @@ export function setupWelcomeFeature(client: Client): void {
     });
 }
 
-async function checkPendingStatus(discordId: string): Promise<{ found: boolean; status?: string }> {
-    try {
-        const spreadsheetId = configService.getPendingSpreadsheetId();
-        const sheetName = configService.getPendingSheetName();
-        if (!spreadsheetId || !sheetName) return { found: false };
-
-        const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!A:H`, 0);
-        for (let i = 1; i < rows.length; i++) {
-            const row = rows[i];
-            const pendingId = (row[1] || '').trim();
-            if (pendingId === discordId) {
-                return { found: true, status: (row[7] || '').trim() };
-            }
-        }
-        return { found: false };
-    } catch {
-        return { found: false };
-    }
-}

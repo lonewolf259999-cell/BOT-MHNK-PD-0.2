@@ -1,7 +1,7 @@
 import type { APIEmbed, Message } from 'discord.js';
 
 /** ตรวจว่า embed มีคำว่า Proctor หรือไม่ */
-export function hasProctorInEmbed(embed: APIEmbed): boolean {
+function hasProctorInEmbed(embed: APIEmbed): boolean {
     if (embed.title?.includes('📋 บันทึกการคุมสอบ Proctor')) return true;
     if (embed.title?.toUpperCase().includes('PROCTOR')) return true;
     if (embed.description?.toUpperCase().includes('PROCTOR')) return true;

@@ -103,9 +103,10 @@ export function extractInfo(text: string): LogtimeInfo {
 
     if (!name) {
         logger.warn('ลงเวลา', 'ไม่พบชื่อในข้อความ — อาจเปลี่ยนรูปแบบข้อความแล้ว');
-    }
-    if (!outMatch && !inMatch) {
+    } else if (!outMatch && !inMatch) {
         logger.warn('ลงเวลา', 'ไม่พบข้อมูลเวลาเข้า/ออกงาน — อาจเปลี่ยนรูปแบบข้อความแล้ว');
+    } else if (!outMatch && inMatch) {
+        logger.warn('ลงเวลา', 'พบข้อมูลเข้างานแต่ไม่พบข้อมูลออกงาน — อาจเปลี่ยนรูปแบบข้อความแล้ว');
     }
 
     return {
