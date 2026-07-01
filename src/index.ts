@@ -87,7 +87,6 @@ client.once(Events.ClientReady, async () => {
     // ✅ ลงทะเบียน Slash Commands ทั้งหมดด้วย Bulk Registration
     // ✅ Slash Commands
     const slashDefs = [
-        { name: '30day', description: '⏳ ตรวจสอบและจัดการสมาชิกครบ 30 วัน', permissions: 0 },
         { name: 'editpd', description: '📝 แก้ไขโปรไฟล์ตำรวจ (ชื่อ IC, เบอร์โทร, อายุ)' },
         { name: 'recount', description: '⚙️ แผงควบคุมตั้งค่าและนับยอดเคส' },
         { name: 'reload', description: '🔄 รีโหลด config จาก Google Sheet', permissions: 0 },
@@ -148,7 +147,6 @@ async function start(): Promise<void> {
         (await import('./features/reload/listener')).setupReloadFeature,
         (await import('./features/count/listener')).setupCountFeature,
         (await import('./features/edit-tag/listener')).setupEditTagFeature,
-        (await import('./features/thirtyday/listener')).setupThirtyDayFeature,
         (await import('./features/editpd/listener')).setupEditPdFeature,
         (await import('./features/recount/listener')).setupRecountFeature,
         (await import('./features/clear/listener')).setupClearFeature,

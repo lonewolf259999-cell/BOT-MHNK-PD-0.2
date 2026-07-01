@@ -1,6 +1,6 @@
 import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, type ColorResolvable, Interaction, ButtonInteraction } from 'discord.js';
 import { configService } from '../../core/config.service';
-import { registerMember, moveMemberToOut, checkPreApproved, checkPendingStatus, checkInOutDc, isAlreadyRegistered } from './welcome.service';
+import { registerMember, checkPreApproved, checkPendingStatus, checkInOutDc, isAlreadyRegistered } from './welcome.service';
 import { getTextChannel } from '../../services/utils';
 import { logger } from '../../core/logger';
 
@@ -137,38 +137,6 @@ export function setupWelcomeFeature(client: Client): void {
             logger.info('ต้อนรับ', `ส่งข้อความต้อนรับให้ ${member.user.tag} (preApproved=${preApproved.approved})`);
         } catch (e: unknown) {
             logger.error('ต้อนรับ', `GuildMemberAdd error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-    });
-
-    client.on(Events.GuildMemberRemove, async (member) => {
-        try {
-            // ✅ ตรวจสอบก่อนว่าออกจาก Discord จริงหรือไม่ (ป้องกัน event ปลอม)
-            const stillInGuild = await member.guild.members.fetch(member.user.id).catch(() => null);
-            if (stillInGuild) {
-                logger.warn('ต้อนรับ', `⚠️ FALSE GuildMemberRemove — ${member.user.tag} ยังอยู่ในเซิร์ฟ ไม่ย้ายออก`);
-                return;
-            }
-
-            await moveMemberToOut(member.user.id);
-            const ch = getTextChannel(member.guild, configService.getWelcomeChannelId());
-            if (!ch) return;
-            await ch.send({
-                embeds: [new EmbedBuilder()
-                    .setColor('#db0042')
-                    .setTitle('😭 บ๊ายบาย แล้วพบกันใหม่')
-                    .setDescription(`สมาชิก <@${member.user.id}> ได้ออกจากเซิร์ฟเวอร์`)
-                    .setThumbnail(member.user.displayAvatarURL())
-                    .addFields(
-                        { name: '👤 ผู้จากไป', value: `<@${member.user.id}>`, inline: true },
-                        { name: '👥 สมาชิกที่เหลือ', value: `${member.guild.memberCount} คน`, inline: true }
-                    )
-                    .setFooter({ text: `${client.user?.username} • วันนี้` })
-                    .setTimestamp()
-                ]
-            });
-            logger.info('ต้อนรับ', `ส่งข้อความออกให้ ${member.user.tag}`);
-        } catch (e: unknown) {
-            logger.error('ต้อนรับ', `GuildMemberRemove error: ${e instanceof Error ? e.message : String(e)}`);
         }
     });
 

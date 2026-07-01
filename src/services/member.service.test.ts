@@ -1,19 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { truncateNickname, stripPrefix, makeFullName } from './member.service';
+import { truncateNickname, makeFullName } from './member.service';
 
 describe('makeFullName', () => {
     it('ควรสร้างชื่อเต็มตาม format', () => {
         expect(makeFullName('001', 'Somchai')).toBe('001 [MHNK-PD] Somchai');
-    });
-});
-
-describe('stripPrefix', () => {
-    it('ควรลบ prefix รหัสออก', () => {
-        expect(stripPrefix('001 [MHNK-PD] Somchai')).toBe('Somchai');
-    });
-
-    it('ควรคืนค่าเดิมถ้าไม่มี prefix', () => {
-        expect(stripPrefix('Somchai')).toBe('Somchai');
     });
 });
 

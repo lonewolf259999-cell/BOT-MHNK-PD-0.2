@@ -17,9 +17,6 @@ export class ConfigService {
     private proctorSendChannelId = '';
     private editTagMode = '';
     private editTagLogChannelId = '';
-    private exemptRoles: string[] = [];
-    private thirtyDayRoleId = '';
-    private dayThreshold = 30;
     async load(bypassCache = false): Promise<void> {
         try {
             const ttl = bypassCache ? 0 : 30000;
@@ -39,10 +36,6 @@ export class ConfigService {
             this.proctorSendChannelId = this.data.PROCTOR_SEND_CHANNEL_ID || '';
             this.editTagMode = this.data.EDIT_TAG_MODE || '';
             this.editTagLogChannelId = this.data.EDIT_TAG_LOG_CHANNEL_ID || '';
-            const exemptRaw = this.data.EXEMPT_ROLES || '1507105753461424198,1507570062649983027,1507107833890738347';
-            this.exemptRoles = exemptRaw.split(',').map(s => s.trim()).filter(Boolean);
-            this.thirtyDayRoleId = this.data.THIRTY_DAY_ROLE_ID || '1509659434681635096';
-            this.dayThreshold = parseInt(this.data.DAY_THRESHOLD || '30', 10) || 30;
             this.loaded = true;
             logger.info('CONFIG', 'โหลด Config จาก Google Sheet สำเร็จ');
         } catch (error) {
@@ -66,10 +59,6 @@ export class ConfigService {
     getPendingSheetName(): string { return this.pendingSheetName; }
     getEditTagMode(): string { return this.editTagMode; }
     getEditTagLogChannelId(): string { return this.editTagLogChannelId; }
-    getExemptRoles(): string[] { return this.exemptRoles; }
-    getThirtyDayRoleId(): string { return this.thirtyDayRoleId; }
-    getDayThreshold(): number { return this.dayThreshold; }
-
     async writeConfigKeys(updates: [string, string][]): Promise<void> {
         const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 0);
         const map = new Map<string, string>();

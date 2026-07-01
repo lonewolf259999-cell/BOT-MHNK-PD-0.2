@@ -1,5 +1,4 @@
 import { sheetService } from '../../core/sheet.service';
-import { silentCatch } from '../../services/utils';
 import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
@@ -131,61 +130,6 @@ export async function checkInOutDc(userId: string): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-/**
- * ฟังก์ชันกลาง — ย้ายสมาชิกจาก NamePD ไป OutDC
- * @param userId - Discord ID
- * @param reason - สาเหตุ (เขียนที่ OutDC คอลัมน์ N)
- */
-export async function moveToOutDC(userId: string, reason?: string): Promise<void> {
-    return locks.sheetMutation.run(async () => {
-        const reg = configService.getRegistryConfig();
-        if (!reg.spreadsheetId || !reg.sheetName || !reg.outSheetName) return;
-
-        // อ่าน NamePD คอลัมน์ C-M
-        const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:M`, 0);
-        let foundRow = -1;
-        const memberData: string[] = [];
-
-        // index 1 = D, index 2 = E (Discord ID) ใน range C-M
-        for (let i = 2; i < rows.length; i++) {
-            if (rows[i] && rows[i][2] && rows[i][2].trim().includes(`<@${userId}>`)) {
-                foundRow = i + 1; // 1-based row number
-                for (let c = 0; c < 11; c++) {
-                    memberData.push(rows[i][c] !== undefined ? String(rows[i][c]).trim() : '');
-                }
-                break;
-            }
-        }
-
-        if (foundRow === -1 || memberData.length === 0) {
-            logger.warn('ย้ายออก', `ไม่พบข้อมูล ${userId}`);
-            return;
-        }
-
-        // หาแถวว่างใน OutDC
-        const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!C:C`, 0);
-        let nextRow = outRows.length + 1;
-        if (nextRow < 3) nextRow = 3;
-
-        // เขียน C-M ไป OutDC
-        await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!C${nextRow}:M${nextRow}`, [memberData]);
-
-        // เขียนสาเหตุที่ N (ถ้ามี)
-        if (reason) {
-            await sheetService.updateValues(reg.spreadsheetId, `${reg.outSheetName}!N${nextRow}`, [[reason]]);
-        }
-
-        // ลบ NamePD คอลัมน์ D-U (คง C=Code ไว้)
-        await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${foundRow}:U${foundRow}`, [new Array(18).fill('')]).catch(silentCatch('ย้ายออก'));
-
-        logger.info('ย้ายออก', `ย้าย ${userId} ไป OutDC แถว ${nextRow}${reason ? ` (${reason})` : ''} (คง C ไว้)`);
-    });
-}
-
-export async function moveMemberToOut(userId: string): Promise<void> {
-    return moveToOutDC(userId, 'ออกจาก Discord');
 }
 
 export async function findMemberByDiscordId(userId: string): Promise<{ row: number; codeNumber: string; currentName: string } | null> {

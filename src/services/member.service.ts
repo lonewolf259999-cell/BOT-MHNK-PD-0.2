@@ -29,11 +29,6 @@ export function truncateNickname(fullName: string, maxLen = 32): string {
     return fullName.slice(0, maxLen);
 }
 
-export function stripPrefix(name: string): string {
-    if (!name) return name;
-    return name.replace(/^\d+\s*\[MHNK-PD\]\s*/i, '').trim();
-}
-
 export function makeFullName(codeNumber: string, icName: string): string {
     return `${codeNumber} [MHNK-PD] ${icName}`;
 }
