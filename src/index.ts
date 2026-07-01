@@ -35,100 +35,13 @@ setInterval(() => {
     }
 }, BOT.WATCHDOG_CHECK_INTERVAL_MS);
 
-function parseBody(req: http.IncomingMessage): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-        let body = '';
-        req.on('data', (chunk: string) => body += chunk);
-        req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
-        req.on('error', reject);
-    });
-}
-
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
     heartbeat();
-    const url = req.url || '';
-    const method = req.method || 'GET';
-
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-    }
-
-    if (url === '/health') {
+    if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() }));
         return;
     }
-
-    if (method === 'POST' && url === '/api/kick-member') {
-        try {
-            const body = await parseBody(req) as { userId?: string; reason?: string };
-            const { userId, reason } = body;
-            if (!userId) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: 'Missing userId' }));
-                return;
-            }
-            const guild = client.guilds.cache.get(env.guildId);
-            if (!guild) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: 'Guild not found' }));
-                return;
-            }
-            await guild.members.kick(userId, reason || 'ถูกปลดออกจากระบบ');
-            logger.info('API', `เตะ ${userId} ออกจากเซิร์ฟ${reason ? ` (${reason})` : ''}`);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, message: `เตะ ${userId} ออกแล้ว` }));
-        } catch (err: unknown) {
-            logger.error('API', `เตะล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }));
-        }
-        return;
-    }
-
-    if (method === 'POST' && url === '/api/swap-roles') {
-        try {
-            const body = await parseBody(req) as { userId?: string };
-            const { userId } = body;
-            if (!userId) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: 'Missing userId' }));
-                return;
-            }
-            const guild = client.guilds.cache.get(env.guildId);
-            if (!guild) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: 'Guild not found' }));
-                return;
-            }
-            const member = await guild.members.fetch(userId).catch(() => null);
-            if (!member) {
-                res.writeHead(404, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: 'Member not found in guild' }));
-                return;
-            }
-            const removeRoleId = '1507114435033038929';
-            const addRoleId = '1509659434681635096';
-            await member.roles.remove(removeRoleId).catch(() => logger.warn('API', `ถอด role ${removeRoleId} ไม่สำเร็จ`));
-            await member.roles.add(addRoleId).catch(() => logger.warn('API', `เพิ่ม role ${addRoleId} ไม่สำเร็จ`));
-            logger.info('API', `สลับบทบาท ${userId}: ลบ ${removeRoleId} → เพิ่ม ${addRoleId}`);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, message: 'สลับบทบาทสำเร็จ' }));
-        } catch (err: unknown) {
-            logger.error('API', `สลับบทบาทล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }));
-        }
-        return;
-    }
-
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot is alive! ✅');
 });
