@@ -1,6 +1,7 @@
 import { Client, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, type ColorResolvable, Interaction, ButtonInteraction } from 'discord.js';
 import { configService } from '../../core/config.service';
-import { registerMember, checkPreApproved, checkPendingStatus, checkInOutDc, isAlreadyRegistered } from './welcome.service';
+import { sheetService } from '../../core/sheet.service';
+import { registerMember, checkPreApproved, checkPendingStatus, checkInOutDc, findMemberByDiscordId } from './welcome.service';
 import { getTextChannel } from '../../services/utils';
 import { logger } from '../../core/logger';
 
@@ -41,7 +42,62 @@ function buildWelcomeEmbedV2(color: ColorResolvable, title: string, description:
         .setTimestamp();
 }
 
+/**
+ * สร้าง embed สำหรับแจ้งเตือนเมื่อมีคนออกจากเซิร์ฟเวอร์
+ */
+function buildLeaveEmbed(userId: string, avatar: string, memberCount: number) {
+    return new EmbedBuilder()
+        .setColor('#808080')
+        .setTitle('😭 บ๊ายบาย แล้วพบกันใหม่')
+        .setDescription(`สมาชิก <@${userId}> ได้ออกจากเซิร์ฟเวอร์`)
+        .setThumbnail(avatar)
+        .addFields(
+            { name: '👤 ผู้จากไป', value: `<@${userId}>`, inline: true },
+            { name: '👥 สมาชิกที่เหลือ', value: `${memberCount} คน`, inline: true }
+        )
+        .setFooter({ text: 'CasePD • วันนี้' })
+        .setTimestamp();
+}
+
 export function setupWelcomeFeature(client: Client): void {
+    client.on(Events.GuildMemberRemove, async (member) => {
+        try {
+            const ch = getTextChannel(member.guild, configService.getWelcomeChannelId());
+            if (!ch) return;
+
+            // อัปเดตคอลัมน์ N ใน NamePD = "ออกจาก Discord"
+            try {
+                const reg = configService.getRegistryConfig();
+                if (reg.spreadsheetId && reg.sheetName) {
+                    const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!E:N`, 0);
+                    for (let i = 1; i < rows.length; i++) {
+                        const discordCell = (rows[i]?.[0] || '').trim();
+                        if (discordCell.includes(member.user.id)) {
+                            const rowNumber = i + 1;
+                            await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!N${rowNumber}`, [['ออกจาก Discord']]);
+                            logger.info('ต้อนรับ', `อัปเดตสถานะ GuildMemberRemove: แถว ${rowNumber} = ออกจาก Discord`);
+                            break;
+                        }
+                    }
+                }
+            } catch (sheetErr) {
+                logger.warn('ต้อนรับ', `อัปเดตชีตล้มเหลว (ไม่ใช่ปัญหาสำคัญ): ${sheetErr instanceof Error ? sheetErr.message : String(sheetErr)}`);
+            }
+
+            await ch.send({
+                embeds: [buildLeaveEmbed(
+                    member.user.id,
+                    member.user.displayAvatarURL(),
+                    member.guild.memberCount
+                )]
+            });
+
+            logger.info('ต้อนรับ', `GuildMemberRemove: ${member.user.tag}`);
+        } catch (e: unknown) {
+            logger.error('ต้อนรับ', `GuildMemberRemove error: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    });
+
     client.on(Events.GuildMemberAdd, async (member) => {
         try {
             const ch = getTextChannel(member.guild, configService.getWelcomeChannelId());
@@ -60,7 +116,7 @@ export function setupWelcomeFeature(client: Client): void {
                         `${client.user?.username} • อดีตตำรวจ`
                     )],
                     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-                        new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId(`btn_check_status_${member.user.id}`).setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
                     )]
                 });
                 logger.info('ต้อนรับ', `OutDC rejoin: ${member.user.tag}`);
@@ -112,7 +168,7 @@ export function setupWelcomeFeature(client: Client): void {
                             `${client.user?.username} • Auto Approve Failed`
                         )],
                         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-                            new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
+                            new ButtonBuilder().setCustomId(`btn_check_status_${member.user.id}`).setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
                         )]
                     });
                 }
@@ -129,7 +185,7 @@ export function setupWelcomeFeature(client: Client): void {
                         true
                     )],
                     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-                        new ButtonBuilder().setCustomId('btn_check_status').setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId(`btn_check_status_${member.user.id}`).setLabel('🔍 ตรวจสอบสถานะ').setStyle(ButtonStyle.Secondary)
                     )]
                 });
             }
@@ -140,11 +196,24 @@ export function setupWelcomeFeature(client: Client): void {
         }
     });
 
-    // ✅ ปุ่มตรวจสอบสถานะ
+    // ✅ ปุ่มตรวจสอบสถานะ — เช็คว่าเป็นของคนนั้นหรือไม่
     client.on(Events.InteractionCreate, async (i: Interaction) => {
         try {
-            if (!i.isButton() || i.customId !== 'btn_check_status') return;
+            if (!i.isButton()) return;
             const btn = i as ButtonInteraction<'cached'>;
+
+            // ตรวจสอบว่าเป็นปุ่ม btn_check_status หรือไม่ (มี prefix)
+            if (!btn.customId.startsWith('btn_check_status')) return;
+
+            // ดึง userId จาก customId (รูปแบบ btn_check_status_<userId>)
+            const targetUserId = btn.customId.replace('btn_check_status_', '');
+
+            // ถ้าไม่ใช่ของตัวเอง
+            if (btn.user.id !== targetUserId) {
+                await btn.reply({ content: '❌ ปุ่มนี้ไม่ใช่ของคุณ', flags: MessageFlags.Ephemeral });
+                return;
+            }
+
             await btn.deferReply({ flags: MessageFlags.Ephemeral });
 
             const userId = btn.user.id;
@@ -191,9 +260,16 @@ export function setupWelcomeFeature(client: Client): void {
                 return;
             }
 
-            const alreadyReg = await isAlreadyRegistered(userId);
-            if (alreadyReg) {
-                await btn.editReply({ content: '✅ คุณมีชื่อในระบบตำรวจอยู่แล้ว ไม่ต้องสมัครซ้ำ' });
+            // ค้นหาใน NamePD ถ้าเจอให้ตั้ง nickname จากคอลัมน์ D
+            const memberInfo = await findMemberByDiscordId(userId);
+            if (memberInfo) {
+                let nickChanged = true;
+                if (member) {
+                    try { await member.setNickname(memberInfo.currentName); } catch { nickChanged = false; }
+                }
+                await btn.editReply({
+                    content: `✅ คุณมีชื่อในระบบตำรวจอยู่แล้ว\n📛 **ชื่อในระบบ:** \`${memberInfo.currentName}\`${nickChanged ? '' : '\n⚠️ ไม่สามารถเปลี่ยนชื่อเล่นได้'}`,
+                });
                 return;
             }
 
@@ -203,4 +279,3 @@ export function setupWelcomeFeature(client: Client): void {
         }
     });
 }
-
