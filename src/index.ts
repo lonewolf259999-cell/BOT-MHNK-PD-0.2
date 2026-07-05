@@ -96,7 +96,8 @@ client.once(Events.ClientReady, async () => {
     const commands: RESTPostAPIApplicationCommandsJSONBody[] = slashDefs.map(def => {
         const cmd = new SlashCommandBuilder().setName(def.name).setDescription(def.description);
         if (def.name === 'de') {
-            cmd.addIntegerOption(opt => opt.setName('amount').setDescription('จำนวนข้อความที่ต้องการลบ (1-500)').setRequired(true).setMinValue(1).setMaxValue(500));
+            cmd.addIntegerOption(opt => opt.setName('amount').setDescription('จำนวนข้อความที่ต้องการลบ (1-500)').setRequired(false).setMinValue(1).setMaxValue(500));
+            cmd.addBooleanOption(opt => opt.setName('all').setDescription('ลบทั้งหมดในห้อง (ลบเป็นรอบๆ)').setRequired(false));
         }
         if (def.permissions !== undefined) cmd.setDefaultMemberPermissions(def.permissions);
         return cmd.toJSON();
