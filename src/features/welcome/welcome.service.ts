@@ -152,3 +152,10 @@ export async function updateMemberName(row: number, newFullName: string): Promis
     await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${row}`, [[truncated]]);
     logger.info('แก้ชื่อ', `อัปเดตแถว ${row} ชื่อเป็น ${truncated}`);
 }
+
+export async function updateMemberPhone(row: number, newPhone: string): Promise<void> {
+    const reg = configService.getRegistryConfig();
+    if (!reg.spreadsheetId || !reg.sheetName) return;
+    await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!B${row}`, [[newPhone]]);
+    logger.info('แก้เบอร์', `อัปเดตแถว ${row} เบอร์เป็น ${newPhone}`);
+}

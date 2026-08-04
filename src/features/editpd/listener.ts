@@ -1,6 +1,6 @@
 import { Client, Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags, EmbedBuilder, ChatInputCommandInteraction, ModalSubmitInteraction } from 'discord.js';
 import { configService } from '../../core/config.service';
-import { findMemberByDiscordId, updateMemberName } from '../welcome/welcome.service';
+import { findMemberByDiscordId, updateMemberName, updateMemberPhone } from '../welcome/welcome.service';
 import { truncateNickname } from '../../services/member.service';
 import { logger } from '../../core/logger';
 import { silentCatch } from '../../services/utils';
@@ -38,55 +38,67 @@ export function setupEditPdFeature(client: Client): void {
                 const newAge = modal.fields.getTextInputValue('input_ooc_age').trim();
                 const uid = modal.user.id;
                 const changed: string[] = [];
+                // ค้นหา embed ใน Log Channel (ทางเลือก — ถ้าไม่มี Log channel หรือไม่เจอ embed ก็ไม่ error)
                 const logChId = configService.getLogChannelId();
-                if (!logChId) {
-                    await modal.editReply({ content: '❌ ไม่ได้ตั้งค่า Log channel' });
-                    return;
-                }
-                const logCh = modal.guild.channels.cache.get(logChId);
-                if (!logCh || !logCh.isTextBased()) {
-                    await modal.editReply({ content: '❌ ไม่พบ Log channel' });
-                    return;
-                }
-                const msgs = await logCh.messages.fetch({ limit: 100 });
                 let embedMsg: import('discord.js').Message | null = null;
-                for (const msg of msgs.values()) {
-                    if (msg.embeds.length > 0) {
-                        const f = msg.embeds[0].fields?.find((x: { name: string; value: string }) => x.name.includes('Discord ID'));
-                        if (f && f.value.replace(/`/g, '').trim() === uid) embedMsg = msg;
+                if (logChId) {
+                    const logCh = modal.guild.channels.cache.get(logChId);
+                    if (logCh && logCh.isTextBased()) {
+                        const msgs = await logCh.messages.fetch({ limit: 100 });
+                        for (const msg of msgs.values()) {
+                            if (msg.embeds.length > 0) {
+                                const f = msg.embeds[0].fields?.find((x: { name: string; value: string }) => x.name.includes('Discord ID'));
+                                if (f && f.value.replace(/`/g, '').trim() === uid) embedMsg = msg;
+                            }
+                        }
                     }
                 }
-                if (!embedMsg) {
-                    await modal.editReply({ content: '❌ ไม่พบประวัติการลงทะเบียน' });
-                    return;
-                }
+                // ค้นหาใน NamePD ก่อนเสมอ (รองรับการกรอกแค่ชื่อหรือแค่เบอร์)
                 let info: { row: number; codeNumber: string; currentName: string } | null = null;
-                if (newName) {
+                if (newName || newPhone) {
                     info = await findMemberByDiscordId(uid);
+                }
+
+                // แก้ชื่อลง NamePD + Nickname
+                if (newName) {
                     if (info) {
                         const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
                         await updateMemberName(info.row, full);
                         try { await modal.member.setNickname(truncateNickname(full)); } catch (e) { logger.warn('EditPD', String(e)); }
-                        changed.push(`ชื่อ IC → **${newName}**`);
                     }
+                    changed.push(`ชื่อ IC → **${newName}**`);
                 }
-                let e = EmbedBuilder.from(embedMsg.embeds[0]);
-                if (newName) {
-                    e = e.spliceFields(1, 1, { name: '📛 ชื่อ IC', value: newName, inline: true });
-                    if (info) {
-                        const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
-                        e = e.spliceFields(2, 1, { name: '⚙️ ชื่อในระบบ (คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ)', value: `\`${truncateNickname(full)}\``, inline: false });
-                    }
-                }
+
+                // แก้เบอร์โทรลง NamePD คอลัมน์ B
                 if (newPhone) {
-                    e = e.spliceFields(3, 1, { name: '📞 เบอร์โทร IC', value: newPhone, inline: true });
+                    if (info) {
+                        await updateMemberPhone(info.row, newPhone);
+                    }
                     changed.push(`เบอร์โทร → **${newPhone}**`);
                 }
+
                 if (newAge) {
-                    e = e.spliceFields(4, 1, { name: '🎂 อายุ OOC', value: `${newAge} ปี`, inline: true });
                     changed.push(`อายุ → **${newAge}**`);
                 }
-                await embedMsg.edit({ embeds: [e] });
+
+                // อัปเดต embed ใน Log Channel (ทางเลือก — ถ้าไม่เจอ ไม่ error)
+                if (embedMsg && (newName || newPhone || newAge)) {
+                    let e = EmbedBuilder.from(embedMsg.embeds[0]);
+                    if (newName) {
+                        e = e.spliceFields(1, 1, { name: '📛 ชื่อ IC', value: newName, inline: true });
+                        if (info) {
+                            const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
+                            e = e.spliceFields(2, 1, { name: '⚙️ ชื่อในระบบ (คัดลอกไปวางที่ Fivem ใน ⚙️Setting > Player Name ก่อนเข้าประเทศ)', value: `\`${truncateNickname(full)}\``, inline: false });
+                        }
+                    }
+                    if (newPhone) {
+                        e = e.spliceFields(3, 1, { name: '📞 เบอร์โทร IC', value: newPhone, inline: true });
+                    }
+                    if (newAge) {
+                        e = e.spliceFields(4, 1, { name: '🎂 อายุ OOC', value: `${newAge} ปี`, inline: true });
+                    }
+                    await embedMsg.edit({ embeds: [e] });
+                }
                 if (changed.length === 0) {
                     await modal.editReply({ content: '⚠️ ไม่มีการเปลี่ยนแปลง' });
                     return;
