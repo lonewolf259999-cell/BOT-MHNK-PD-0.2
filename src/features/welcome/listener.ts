@@ -125,7 +125,7 @@ export function setupWelcomeFeature(client: Client): void {
 
             const preApproved = await checkPreApproved(member.user.id);
             if (preApproved.approved && preApproved.icName) {
-                const result = await registerMember(preApproved.icName, member.user.id);
+                const result = await registerMember(preApproved.icName, member.user.id, preApproved.icPhone || '');
                 if (result) {
                     let nickChanged = true;
                     try { await member.setNickname(result.nickname); } catch { nickChanged = false; }
@@ -228,7 +228,7 @@ export function setupWelcomeFeature(client: Client): void {
             const preApproved = await checkPreApproved(userId);
             if (preApproved.approved && preApproved.icName) {
                 await btn.editReply({ content: '✅ พบการอนุมัติ! กำลังลงทะเบียนให้...' });
-                const result = await registerMember(preApproved.icName, userId);
+                const result = await registerMember(preApproved.icName, userId, preApproved.icPhone || '');
                 if (result) {
                     let nickChanged = true;
                     if (member) { try { await member.setNickname(result.nickname); } catch { nickChanged = false; } }

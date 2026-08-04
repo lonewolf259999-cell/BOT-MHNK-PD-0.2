@@ -57,7 +57,7 @@ export async function isAlreadyRegistered(userId: string, bypassCache = false): 
     return false;
 }
 
-export async function registerMember(icName: string, userId: string): Promise<{ nickname: string; wasTruncated: boolean } | null> {
+export async function registerMember(icName: string, userId: string, icPhone = ''): Promise<{ nickname: string; wasTruncated: boolean } | null> {
     return locks.sheetMutation.run(async () => {
         if (await isAlreadyRegistered(userId, false)) {
             logger.warn('สมัคร', `ผู้ใช้ ${userId} พยายามสมัครซ้ำ (pre-check)`);
@@ -106,9 +106,12 @@ export async function registerMember(icName: string, userId: string): Promise<{ 
             const today = new Date();
             const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
 
-            await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!D${targetRow}:E${targetRow}`, [[truncatedNick, `'<@${userId}>`]]);
-            await sheetService.updateValues(reg.spreadsheetId, `${reg.sheetName}!H${targetRow}`, [[formattedDate]]);
-            logger.info('สมัคร', `ลงทะเบียน ${fullNickname} แถว ${targetRow}`);
+            await sheetService.batchUpdateValues(reg.spreadsheetId, [
+                { range: `${reg.sheetName}!B${targetRow}`, values: [[icPhone]] },
+                { range: `${reg.sheetName}!D${targetRow}:E${targetRow}`, values: [[truncatedNick, `'<@${userId}>`]] },
+                { range: `${reg.sheetName}!H${targetRow}`, values: [[formattedDate]] },
+            ]);
+            logger.info('สมัคร', `ลงทะเบียน ${fullNickname} เบอร์ ${icPhone} แถว ${targetRow}`);
             return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
 
         } catch (error) {
