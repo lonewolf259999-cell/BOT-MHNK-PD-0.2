@@ -4,7 +4,7 @@ import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import { sleep } from '../../services/utils';
-import { hasBypdInEmbed, hasPdInEmbed, hasBypdOrPdInMessage, hasCarryInMessage } from './bypd.utils';
+import { hasBypdInEmbed, hasPdInEmbed, hasBypdOrPdInMessage, hasCarryInMessage, hasTake2InMessage } from './bypd.utils';
 
 /** กัน process message ซ้ำ (message.id เดียว) */
 const processedMessages = new Set<string>();
@@ -33,6 +33,19 @@ async function sendWithCarryQueue(ch: GuildTextBasedChannel, guild: Guild, conte
             return true;
         } catch (err: unknown) {
             logger.error('BYPD', `ส่งรายงาน Carry ล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
+            return false;
+        }
+    });
+}
+
+/** Queue: ส่งทีละ 1 รายงาน TAKE2 ป้องกัน Discord rate limit */
+async function sendWithTake2Queue(ch: GuildTextBasedChannel, guild: Guild, content: string): Promise<boolean> {
+    return locks.take2Send.run(async () => {
+        try {
+            await sendTake2Report(ch, guild, content);
+            return true;
+        } catch (err: unknown) {
+            logger.error('BYPD', `ส่งรายงาน TAKE2 ล้มเหลว: ${err instanceof Error ? err.message : String(err)}`);
             return false;
         }
     });
@@ -151,6 +164,28 @@ async function sendCarryReport(ch: GuildTextBasedChannel, guild: Guild, content:
     });
 }
 
+/** ส่ง report TAKE2 หนึ่งคดี (1 embed หรือ 1 content) */
+async function sendTake2Report(ch: GuildTextBasedChannel, guild: Guild, content: string): Promise<void> {
+    const tags = await resolveTags(guild, content);
+    const det = parseDetails(content);
+    await ch.send({
+        content: tags.join(' ') || '-',
+        embeds: [new EmbedBuilder()
+            .setTitle('📋 รายงานคดี TAKE2')
+            .setColor(0x8b5cf6)
+            .addFields(
+                { name: '👮 เจ้าหน้าที่', value: det.officer, inline: true },
+                { name: '🔴 ผู้ต้องหา', value: det.offender, inline: true },
+                { name: '📁 คดี', value: det.caseInfo, inline: false },
+                { name: '🔒 จำคุก', value: det.jail, inline: true },
+                { name: '💰 ค่าปรับ', value: det.fine, inline: true },
+                { name: '🕐 เวลา', value: det.time, inline: true }
+            )
+            .setTimestamp()
+        ]
+    });
+}
+
 export async function processBypd(message: Message): Promise<boolean> {
     // ป้องกัน process message ID ซ้ำ
     if (processedMessages.has(message.id)) return false;
@@ -159,10 +194,19 @@ export async function processBypd(message: Message): Promise<boolean> {
 
     const guild = message.guild; if (!guild) return false;
 
+    // ตรวจว่ามีคำว่า "TAKE2" หรือไม่ (ลำดับแรก)
+    const isTake2 = hasTake2InMessage(message);
     // ตรวจว่ามีคำว่า "อุ้มห่อ" หรือไม่
-    const isCarry = hasCarryInMessage(message);
+    const isCarry = !isTake2 && hasCarryInMessage(message);
 
-    const chId = isCarry ? configService.getCarrySendChannelId() : configService.getBypdSendChannelId();
+    let chId: string;
+    if (isTake2) {
+        chId = configService.getTake2SendChannelId();
+    } else if (isCarry) {
+        chId = configService.getCarrySendChannelId();
+    } else {
+        chId = configService.getBypdSendChannelId();
+    }
     const ch = guild.channels.cache.get(chId);
     if (!ch || !ch.isTextBased()) return false;
 
@@ -170,9 +214,14 @@ export async function processBypd(message: Message): Promise<boolean> {
 
     // 1. เช็ค message.content
     if (message.content?.trim() && hasBypdOrPdInMessage(message)) {
-        const ok = isCarry
-            ? await sendWithCarryQueue(ch as GuildTextBasedChannel, guild, message.content.trim())
-            : await sendWithQueue(ch as GuildTextBasedChannel, guild, message.content.trim());
+        let ok: boolean;
+        if (isTake2) {
+            ok = await sendWithTake2Queue(ch as GuildTextBasedChannel, guild, message.content.trim());
+        } else if (isCarry) {
+            ok = await sendWithCarryQueue(ch as GuildTextBasedChannel, guild, message.content.trim());
+        } else {
+            ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, message.content.trim());
+        }
         if (ok) count++;
         await sleep(1000);
     }
@@ -181,9 +230,14 @@ export async function processBypd(message: Message): Promise<boolean> {
     for (const embed of message.embeds) {
         const embedJson = embed.toJSON();
         if (hasBypdInEmbed(embedJson) || hasPdInEmbed(embedJson)) {
-            const ok = isCarry
-                ? await sendWithCarryQueue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson))
-                : await sendWithQueue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson));
+            let ok: boolean;
+            if (isTake2) {
+                ok = await sendWithTake2Queue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson));
+            } else if (isCarry) {
+                ok = await sendWithCarryQueue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson));
+            } else {
+                ok = await sendWithQueue(ch as GuildTextBasedChannel, guild, extractEmbedContent(embedJson));
+            }
             if (ok) count++;
             await sleep(1000);
         }
@@ -204,7 +258,10 @@ export async function processBypd(message: Message): Promise<boolean> {
                 try { await message.react(emoji); } catch (e) { logger.warn('BYPD', String(e)); }
             }
         }
-        logger.info('BYPD', `ส่ง ${count} คดี${isCarry ? ' (อุ้มห่อ)' : ''} จากข้อความ ${message.id}`);
+        let logType = '';
+        if (isTake2) logType = ' (TAKE2)';
+        else if (isCarry) logType = ' (อุ้มห่อ)';
+        logger.info('BYPD', `ส่ง ${count} คดี${logType} จากข้อความ ${message.id}`);
     }
     return count > 0;
 }

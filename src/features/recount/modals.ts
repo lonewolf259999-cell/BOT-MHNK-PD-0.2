@@ -43,6 +43,13 @@ export function buildBypdModal(): ModalBuilder {
     ]);
 }
 
+export function buildTake2Modal(): ModalBuilder {
+    return createModal('modal_cfg_take2', 'ตั้งค่า — TAKE2', [
+        ['input_logtake2_channel', 'LOGTAKE2_CHANNEL_ID', configService.getLogTake2ChannelId()],
+        ['input_take2_send', 'TAKE2_SEND_CHANNEL_ID', configService.getTake2SendChannelId()],
+    ]);
+}
+
 export function buildRegistryModal(): ModalBuilder {
     const reg = configService.getRegistryConfig();
     return createModal('modal_cfg_registry', 'ตั้งค่า — ชีตลงทะเบียน PD', [

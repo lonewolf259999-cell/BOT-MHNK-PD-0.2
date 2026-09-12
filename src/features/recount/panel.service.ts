@@ -26,6 +26,9 @@ export function createPanelEmbed(): EmbedBuilder {
             `• ส่ง BYPD: ${ch(configService.getBypdSendChannelId())}\n` +
             `• ส่ง Carry: ${ch(configService.getCarrySendChannelId())}\n` +
             `• ส่ง Proctor: ${ch(configService.getProctorSendChannelId())}\n\n` +
+            '**TAKE2**\n' +
+            `• Log TAKE2: ${ch(configService.getLogTake2ChannelId())}\n` +
+            `• ส่ง TAKE2: ${ch(configService.getTake2SendChannelId())}\n\n` +
             '**ชีตลงทะเบียน PD**\n' +
             `• ID: \`${reg.spreadsheetId}\`\n` +
             `• แท็บ: \`${reg.sheetName}\` | ออก: \`${reg.outSheetName}\``
@@ -45,6 +48,7 @@ export function buildPanelComponents(): ActionRowBuilder<ButtonBuilder>[] {
         ),
         new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder().setCustomId('btn_cfg_bypd').setLabel('🆔 ตั้งค่า — ระบบคดี').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('btn_cfg_take2').setLabel('🏷️ ตั้งค่า — TAKE2').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('btn_cfg_registry').setLabel('📋 ตั้งค่า — ชีต PD').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('btn_refresh_config').setLabel('🔄 รีเฟรช config').setStyle(ButtonStyle.Success),
         ),

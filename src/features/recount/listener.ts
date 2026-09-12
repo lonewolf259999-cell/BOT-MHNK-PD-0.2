@@ -3,7 +3,7 @@ import { configService } from '../../core/config.service';
 import { manualRecount } from '../count/count.service';
 import { createPanelEmbed, buildPanelComponents } from './panel.service';
 import { replyAndDelete, silentCatch } from '../../services/utils';
-import { buildCountModal, buildWelcomeModal, buildBypdModal, buildRegistryModal } from './modals';
+import { buildCountModal, buildWelcomeModal, buildBypdModal, buildTake2Modal, buildRegistryModal } from './modals';
 import { logger } from '../../core/logger';
 import { resendStates } from './resend.state';
 import { processBypd } from '../bypd/bypd.service';
@@ -12,12 +12,12 @@ import { processProctor } from '../proctor/proctor.service';
 import { hasProctorInMessage } from '../proctor/proctor.utils';
 
 const PANEL_IDS = new Set([
-    'btn_recount_manual', 'btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_registry',
+    'btn_recount_manual', 'btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_take2', 'btn_cfg_registry',
     'btn_refresh_config', 'btn_resend_bypd',
-    'modal_cfg_count', 'modal_cfg_welcome', 'modal_cfg_bypd', 'modal_cfg_registry',
+    'modal_cfg_count', 'modal_cfg_welcome', 'modal_cfg_bypd', 'modal_cfg_take2', 'modal_cfg_registry',
 ]);
 
-const MODAL_BUTTONS = ['btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_registry'];
+const MODAL_BUTTONS = ['btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_take2', 'btn_cfg_registry'];
 
 export function setupRecountFeature(client: Client): void {
     client.on(Events.InteractionCreate, async (i) => {
@@ -50,6 +50,7 @@ export function setupRecountFeature(client: Client): void {
                     'btn_cfg_count': buildCountModal(),
                     'btn_cfg_welcome': buildWelcomeModal(),
                     'btn_cfg_bypd': buildBypdModal(),
+                    'btn_cfg_take2': buildTake2Modal(),
                     'btn_cfg_registry': buildRegistryModal(),
                 };
                 await btn.showModal(modals[btn.customId]).catch(silentCatch('Recount'));
@@ -143,6 +144,13 @@ export function setupRecountFeature(client: Client): void {
                             ['PROCTOR_SEND_CHANNEL_ID', modal.fields.getTextInputValue('input_proctor_send').trim()],
                         ]);
                         await replyAndDelete(modal, '✅ บันทึกตั้งค่าระบบคดีแล้ว');
+                        break;
+                    case 'modal_cfg_take2':
+                        await save([
+                            ['LOGTAKE2_CHANNEL_ID', modal.fields.getTextInputValue('input_logtake2_channel').trim()],
+                            ['TAKE2_SEND_CHANNEL_ID', modal.fields.getTextInputValue('input_take2_send').trim()],
+                        ]);
+                        await replyAndDelete(modal, '✅ บันทึกตั้งค่า TAKE2แล้ว');
                         break;
                     case 'modal_cfg_registry':
                         await save([

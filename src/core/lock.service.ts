@@ -6,5 +6,6 @@ export const locks = {
     sheetMutation: new Mutex(),
     bypdSend: new Mutex(),
     carrySend: new Mutex(),
+    take2Send: new Mutex(),
     proctorSend: new Mutex(),
 };
