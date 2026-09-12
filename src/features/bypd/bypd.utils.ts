@@ -19,6 +19,15 @@ export function hasPdInEmbed(embed: APIEmbed): boolean {
     return false;
 }
 
+/** ตรวจว่า embed มีคำว่า อุ้มห่อ หรือไม่ */
+export function hasCarryInEmbed(embed: APIEmbed): boolean {
+    if (embed.title?.includes('อุ้มห่อ')) return true;
+    if (embed.description?.includes('อุ้มห่อ')) return true;
+    if (embed.fields?.some((f) => f.name?.includes('อุ้มห่อ') || f.value?.includes('อุ้มห่อ'))) return true;
+    if (embed.footer?.text?.includes('อุ้มห่อ')) return true;
+    return false;
+}
+
 /** ตรวจว่าข้อความหรือ embed ใดๆ มี BYPD หรือ PD หรือไม่ */
 export function hasBypdOrPdInMessage(msg: Message): boolean {
     if (msg.content?.toUpperCase().includes('BYPD')) return true;
@@ -27,4 +36,10 @@ export function hasBypdOrPdInMessage(msg: Message): boolean {
         const json = e.toJSON();
         return hasBypdInEmbed(json) || hasPdInEmbed(json);
     }) ?? false;
+}
+
+/** ตรวจว่าข้อความหรือ embed ใดๆ มีคำว่า อุ้มห่อ หรือไม่ */
+export function hasCarryInMessage(msg: Message): boolean {
+    if (msg.content?.includes('อุ้มห่อ')) return true;
+    return msg.embeds?.some((e) => hasCarryInEmbed(e.toJSON())) ?? false;
 }

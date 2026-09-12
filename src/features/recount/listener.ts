@@ -139,6 +139,7 @@ export function setupRecountFeature(client: Client): void {
                         await save([
                             ['LOGCASE_CHANNEL_ID', modal.fields.getTextInputValue('input_logcase_channel').trim()],
                             ['BYPD_SEND_CHANNEL_ID', modal.fields.getTextInputValue('input_bypd_send').trim()],
+                            ['CARRY_SEND_CHANNEL_ID', modal.fields.getTextInputValue('input_carry_send').trim()],
                             ['PROCTOR_SEND_CHANNEL_ID', modal.fields.getTextInputValue('input_proctor_send').trim()],
                         ]);
                         await replyAndDelete(modal, '✅ บันทึกตั้งค่าระบบคดีแล้ว');

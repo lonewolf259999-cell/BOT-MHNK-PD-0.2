@@ -38,6 +38,7 @@ export function buildBypdModal(): ModalBuilder {
     return createModal('modal_cfg_bypd', 'ตั้งค่า — ระบบคดี', [
         ['input_logcase_channel', 'LOGCASE_CHANNEL_ID', configService.getLogCaseChannelId()],
         ['input_bypd_send', 'BYPD_SEND_CHANNEL_ID', configService.getBypdSendChannelId()],
+        ['input_carry_send', 'CARRY_SEND_CHANNEL_ID', configService.getCarrySendChannelId()],
         ['input_proctor_send', 'PROCTOR_SEND_CHANNEL_ID', configService.getProctorSendChannelId()],
     ]);
 }

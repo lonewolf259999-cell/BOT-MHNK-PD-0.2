@@ -24,6 +24,7 @@ export function createPanelEmbed(): EmbedBuilder {
             '**BYPD / Proctor / LogCase**\n' +
             `• LogCase: ${ch(configService.getLogCaseChannelId())}\n` +
             `• ส่ง BYPD: ${ch(configService.getBypdSendChannelId())}\n` +
+            `• ส่ง Carry: ${ch(configService.getCarrySendChannelId())}\n` +
             `• ส่ง Proctor: ${ch(configService.getProctorSendChannelId())}\n\n` +
             '**ชีตลงทะเบียน PD**\n' +
             `• ID: \`${reg.spreadsheetId}\`\n` +
