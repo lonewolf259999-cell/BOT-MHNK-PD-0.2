@@ -46,15 +46,15 @@ export function hasCarryInMessage(msg: Message): boolean {
 
 /** ตรวจว่า embed มีคำว่า TAKE2 หรือไม่ */
 export function hasTake2InEmbed(embed: APIEmbed): boolean {
-    if (embed.title?.includes('TAKE2')) return true;
-    if (embed.description?.includes('TAKE2')) return true;
-    if (embed.fields?.some((f) => f.name?.includes('TAKE2') || f.value?.includes('TAKE2'))) return true;
-    if (embed.footer?.text?.includes('TAKE2')) return true;
+    if (embed.title?.toUpperCase().includes('TAKE2')) return true;
+    if (embed.description?.toUpperCase().includes('TAKE2')) return true;
+    if (embed.fields?.some((f) => f.name?.toUpperCase().includes('TAKE2') || f.value?.toUpperCase().includes('TAKE2'))) return true;
+    if (embed.footer?.text?.toUpperCase().includes('TAKE2')) return true;
     return false;
 }
 
 /** ตรวจว่าข้อความหรือ embed ใดๆ มีคำว่า TAKE2 หรือไม่ */
 export function hasTake2InMessage(msg: Message): boolean {
-    if (msg.content?.includes('TAKE2')) return true;
+    if (msg.content?.toUpperCase().includes('TAKE2')) return true;
     return msg.embeds?.some((e) => hasTake2InEmbed(e.toJSON())) ?? false;
 }

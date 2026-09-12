@@ -8,7 +8,9 @@ export function setupBypdFeature(client: Client): void {
     client.on(Events.MessageCreate, async (message: Message) => {
         try {
             const logCaseId = configService.getLogCaseChannelId();
-            if (!logCaseId || message.channel.id !== logCaseId) return;
+            const logTake2Id = configService.getLogTake2ChannelId();
+            if (!logCaseId && !logTake2Id) return;
+            if (message.channel.id !== logCaseId && message.channel.id !== logTake2Id) return;
             if (!hasBypdOrPdInMessage(message)) return;
             await processBypd(message);
         } catch (e: unknown) {

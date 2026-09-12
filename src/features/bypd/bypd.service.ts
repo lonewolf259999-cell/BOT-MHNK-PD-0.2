@@ -164,23 +164,22 @@ async function sendCarryReport(ch: GuildTextBasedChannel, guild: Guild, content:
     });
 }
 
-/** ส่ง report TAKE2 หนึ่งคดี (1 embed หรือ 1 content) */
+/** ส่ง report TAKE2 แบบ Embed */
 async function sendTake2Report(ch: GuildTextBasedChannel, guild: Guild, content: string): Promise<void> {
     const tags = await resolveTags(guild, content);
     const det = parseDetails(content);
+    const embedText = [
+        '**รายงานการใช้งาน Take2**',
+        `เจ้าหน้าที่ : ${det.officer}`,
+        `ผู้ต้องหา : ${det.offender}`,
+        content.includes('ใช้งาน Take2') ? 'ผู้ต้องหาได้ใช้งาน Take2' : '',
+        `เวลา ${det.time}`,
+    ].filter(line => line.trim() !== '').join('\n');
     await ch.send({
         content: tags.join(' ') || '-',
         embeds: [new EmbedBuilder()
-            .setTitle('📋 รายงานคดี TAKE2')
             .setColor(0x8b5cf6)
-            .addFields(
-                { name: '👮 เจ้าหน้าที่', value: det.officer, inline: true },
-                { name: '🔴 ผู้ต้องหา', value: det.offender, inline: true },
-                { name: '📁 คดี', value: det.caseInfo, inline: false },
-                { name: '🔒 จำคุก', value: det.jail, inline: true },
-                { name: '💰 ค่าปรับ', value: det.fine, inline: true },
-                { name: '🕐 เวลา', value: det.time, inline: true }
-            )
+            .setDescription(embedText)
             .setTimestamp()
         ]
     });

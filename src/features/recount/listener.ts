@@ -7,7 +7,7 @@ import { buildCountModal, buildWelcomeModal, buildBypdModal, buildTake2Modal, bu
 import { logger } from '../../core/logger';
 import { resendStates } from './resend.state';
 import { processBypd } from '../bypd/bypd.service';
-import { hasBypdOrPdInMessage } from '../bypd/bypd.utils';
+import { hasBypdOrPdInMessage, hasCarryInMessage, hasTake2InMessage } from '../bypd/bypd.utils';
 import { processProctor } from '../proctor/proctor.service';
 import { hasProctorInMessage } from '../proctor/proctor.utils';
 
@@ -184,46 +184,60 @@ interface ResendResult {
 }
 
 async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal): Promise<ResendResult> {
-    const logChannelId = configService.getLogCaseChannelId();
+    const logCaseId = configService.getLogCaseChannelId();
+    const logTake2Id = configService.getLogTake2ChannelId();
     const guild = interaction.guild;
-    if (!logChannelId || !guild) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
-    const logChannel = guild.channels.cache.get(logChannelId);
-    if (!logChannel || !logChannel.isTextBased()) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
-    let scanned = 0, bypdSent = 0, failed = 0, bypdAlready = 0;
+    if (!logCaseId && !logTake2Id) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
+    let scanned = 0, bypdSent = 0, carrySent = 0, take2Sent = 0, failed = 0, bypdAlready = 0, carryAlready = 0, take2Already = 0;
     let proctorSent = 0, proctorAlready = 0;
-    let lastId: string | undefined;
-    while (true) {
-        if (abortSignal.aborted) break;
-        const messages = await logChannel.messages.fetch({ limit: 100, before: lastId });
-        if (messages.size === 0) break;
-        const batch = [...messages.values()].reverse();
-        for (const msg of batch) {
-            const hasBypd = hasBypdOrPdInMessage(msg);
-            const hasProctor = hasProctorInMessage(msg);
-            const hasCheck = msg.reactions.cache.some((r) => r.emoji.name === '✅');
-
-            if (hasBypd && !hasCheck) {
-                try { await processBypd(msg); bypdSent++; } catch { failed++; }
-                await new Promise(r => setTimeout(r, 500));
-            } else if (hasBypd && hasCheck) {
-                bypdAlready++;
+    const scanChannel = async (channelId: string) => {
+        if (!guild) return;
+        const logChannel = guild.channels.cache.get(channelId);
+        if (!logChannel || !logChannel.isTextBased()) return;
+        let lastId: string | undefined;
+        while (true) {
+            if (abortSignal.aborted) break;
+            const messages = await logChannel.messages.fetch({ limit: 100, before: lastId });
+            if (messages.size === 0) break;
+            const batch = [...messages.values()].reverse();
+            for (const msg of batch) {
+                const hasBypd = hasBypdOrPdInMessage(msg);
+                const hasProctor = hasProctorInMessage(msg);
+                const hasCheck = msg.reactions.cache.some((r) => r.emoji.name === '✅');
+                if (hasBypd && !hasCheck) {
+                    try {
+                        const isTake2 = hasTake2InMessage(msg);
+                        const isCarry = !isTake2 && hasCarryInMessage(msg);
+                        await processBypd(msg);
+                        if (isTake2) take2Sent++;
+                        else if (isCarry) carrySent++;
+                        else bypdSent++;
+                    } catch { failed++; }
+                    await new Promise(r => setTimeout(r, 500));
+                } else if (hasBypd && hasCheck) {
+                    if (hasTake2InMessage(msg)) take2Already++;
+                    else if (hasCarryInMessage(msg)) carryAlready++;
+                    else bypdAlready++;
+                }
+                if (hasProctor && !hasCheck) {
+                    try { await processProctor(msg); proctorSent++; } catch { failed++; }
+                    await new Promise(r => setTimeout(r, 500));
+                } else if (hasProctor && hasCheck) {
+                    proctorAlready++;
+                }
             }
-
-            if (hasProctor && !hasCheck) {
-                try { await processProctor(msg); proctorSent++; } catch { failed++; }
-                await new Promise(r => setTimeout(r, 500));
-            } else if (hasProctor && hasCheck) {
-                proctorAlready++;
-            }
+            scanned += batch.length;
+            lastId = messages.last()?.id;
         }
-        scanned += batch.length;
-        lastId = messages.last()?.id;
-    }
+    };
+    if (logCaseId) await scanChannel(logCaseId);
+    if (logTake2Id) await scanChannel(logTake2Id);
+    const totalSent = bypdSent + carrySent + take2Sent;
     return {
-        sent: bypdSent,
+        sent: totalSent,
         failed,
         message: abortSignal.aborted
-            ? `⏹️ หยุดส่งย้อนหลังแล้ว\n📊 สแกน: ${scanned}\n📊 BYPD: ${bypdSent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยแล้ว: BYPD ${bypdAlready} | Proctor ${proctorAlready}`
-            : `✅ ส่งย้อนหลังเสร็จสิ้น\n📊 สแกน: ${scanned}\n📊 BYPD: ${bypdSent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยแล้ว: BYPD ${bypdAlready} | Proctor ${proctorAlready}`,
+            ? `⏹️ หยุดส่งย้อนหลังแล้ว\n📊 สแกน: ${scanned}\n📊 BYPD: ${bypdSent} | Carry: ${carrySent} | TAKE2: ${take2Sent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยแล้ว: BYPD ${bypdAlready} | Carry ${carryAlready} | TAKE2 ${take2Already} | Proctor ${proctorAlready}`
+            : `✅ ส่งย้อนหลังเสร็จสิ้น\n📊 สแกน: ${scanned}\n📊 BYPD: ${bypdSent} | Carry: ${carrySent} | TAKE2: ${take2Sent} | Proctor: ${proctorSent} | ❌ ${failed}\n📊 เคยแล้ว: BYPD ${bypdAlready} | Carry ${carryAlready} | TAKE2 ${take2Already} | Proctor ${proctorAlready}`,
     };
 }
