@@ -19,7 +19,6 @@ export class ConfigService {
     private logTake2ChannelId = '';
     private proctorSendChannelId = '';
     private editTagMode = '';
-    private editTagLogChannelId = '';
     async load(bypassCache = false): Promise<void> {
         try {
             const ttl = bypassCache ? 0 : 30000;
@@ -41,7 +40,6 @@ export class ConfigService {
             this.logTake2ChannelId = this.data.LOGTAKE2_CHANNEL_ID || '';
             this.proctorSendChannelId = this.data.PROCTOR_SEND_CHANNEL_ID || '';
             this.editTagMode = this.data.EDIT_TAG_MODE || '';
-            this.editTagLogChannelId = this.data.EDIT_TAG_LOG_CHANNEL_ID || '';
             this.loaded = true;
             logger.info('CONFIG', 'โหลด Config จาก Google Sheet สำเร็จ');
         } catch (error) {
@@ -67,7 +65,6 @@ export class ConfigService {
     getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
     getPendingSheetName(): string { return this.pendingSheetName; }
     getEditTagMode(): string { return this.editTagMode; }
-    getEditTagLogChannelId(): string { return this.editTagLogChannelId; }
     async writeConfigKeys(updates: [string, string][]): Promise<void> {
         const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 0);
         const map = new Map<string, string>();
