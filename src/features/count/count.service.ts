@@ -35,7 +35,7 @@ async function flushCountQueue(): Promise<void> {
     countQueue = [];
     if (ops.length === 0) return;
 
-    await locks.count.run(async () => {
+    await locks.countBatch.run(async () => {
         const cfg = configService.getCountConfig();
         if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) return;
 

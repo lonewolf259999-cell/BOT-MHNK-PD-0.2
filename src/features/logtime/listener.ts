@@ -46,12 +46,12 @@ function buildMessageText(msg: Message): string {
 
 export interface LogtimeInfo {
     name: string | null;
-    inDate: string | null;
-    inTime: string | null;
+    inDate: string | null | undefined;
+    inTime: string | null | undefined;
     date: string | null;
     time: string | null;
-    duration: string | null;
-    id: string | null;
+    duration: string | null | undefined;
+    id: string | null | undefined;
 }
 
 const LOGTIME_PATTERNS = [

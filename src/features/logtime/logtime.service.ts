@@ -3,16 +3,7 @@ import { configService } from '../../core/config.service';
 import { normalizeName } from '../../services/utils';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
-
-interface LogtimeInfo {
-    name: string;
-    date: string;
-    time: string;
-    id?: string;
-    inDate?: string;
-    inTime?: string;
-    duration?: string;
-}
+import type { LogtimeInfo } from './listener';
 
 const WEEKDAY_COL: Record<number, string> = {
     1: 'O',  // Mon
@@ -152,33 +143,41 @@ function getAccumulatedMinutes(rows: string[][], col: string, row: number): numb
 }
 
 export async function processLogtime(info: LogtimeInfo): Promise<string> {
+    if (!info.name || !info.date) return '❌ ข้อมูลไม่ครบ';
+    const name = info.name;
+    const date = info.date;
+    const time = info.time || '';
+    const id = info.id;
+    const inDate = info.inDate;
+    const inTime = info.inTime;
+    const duration = info.duration;
     return locks.logtime.run(async () => {
         const reg = configService.getRegistryConfig();
         if (!reg.spreadsheetId || !reg.sheetName) return '❌ Config ไม่พร้อม';
         // อ่านค่าไม่ใช้ cache (ttl=0) เพื่อป้องกันอ่านค่าที่ล้าสมัย
         const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!D:Y`, 0);
-        const result = findRow(rows, info.name, info.id);
+        const result = findRow(rows, name, id ?? undefined);
         const updates: { range: string; values: string[][] }[] = [];
 
         switch (result.action) {
             case 'update_time':
-                updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[info.date, info.time]] });
-                accumulateWeekday(rows, updates, info, result.row, reg.sheetName);
+                updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[date, time]] });
+                accumulateWeekday(rows, updates, { name, date, time, id, inDate, inTime, duration }, result.row, reg.sheetName);
                 break;
 
             case 'update_time_steam':
-                updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[info.date, info.time]] });
-                if (info.id) updates.push({ range: `${reg.sheetName}!M${result.row}`, values: [[info.id]] });
-                accumulateWeekday(rows, updates, info, result.row, reg.sheetName);
+                updates.push({ range: `${reg.sheetName}!J${result.row}:K${result.row}`, values: [[date, time]] });
+                if (id) updates.push({ range: `${reg.sheetName}!M${result.row}`, values: [[id]] });
+                accumulateWeekday(rows, updates, { name, date, time, id, inDate, inTime, duration }, result.row, reg.sheetName);
                 break;
 
             case 'skip':
-                logger.info('ลงเวลา', `${info.name} -> ข้าม (มี X+Y แล้ว)`);
-                return `${info.name} -> ข้าม (มีในระบบแล้ว)`;
+                logger.info('ลงเวลา', `${name} -> ข้าม (มี X+Y แล้ว)`);
+                return `${name} -> ข้าม (มีในระบบแล้ว)`;
 
             case 'create_new':
-                updates.push({ range: `${reg.sheetName}!X${result.row}`, values: [[info.name]] });
-                if (info.id) updates.push({ range: `${reg.sheetName}!Y${result.row}`, values: [[info.id]] });
+                updates.push({ range: `${reg.sheetName}!X${result.row}`, values: [[name]] });
+                if (id) updates.push({ range: `${reg.sheetName}!Y${result.row}`, values: [[id]] });
                 break;
         }
 
@@ -187,8 +186,8 @@ export async function processLogtime(info: LogtimeInfo): Promise<string> {
         const note = result.action === 'create_new'
             ? `ใหม่ที่ X${result.row}`
             : `แถว ${result.row}`;
-        logger.info('ลงเวลา', `${info.name} -> ${note}`);
-        return `${info.name} -> ${note}`;
+        logger.info('ลงเวลา', `${name} -> ${note}`);
+        return `${name} -> ${note}`;
     });
 }
 
@@ -201,7 +200,7 @@ function accumulateWeekday(
     sheetName: string,
 ): void {
     const { duration, inDate, inTime, date } = info;
-    if (!duration) return;
+    if (!duration || !date) return;
 
     const totalMinutes = timeToMinutes(duration);
     if (totalMinutes <= 0) return;

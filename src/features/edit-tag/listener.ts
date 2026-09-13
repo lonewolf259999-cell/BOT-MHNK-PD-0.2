@@ -167,7 +167,15 @@ export function setupEditTagFeature(client: Client): void {
                         added++;
                     }
                 }
-                await msg.edit(c);
+                try {
+                    await msg.edit(c);
+                } catch {
+                    // Webhook message แก้ไม่ได้ → ลบแล้วส่งใหม่
+                    await msg.delete();
+                    if (msg.channel.isTextBased()) {
+                        await (msg.channel as import('discord.js').GuildTextBasedChannel).send(c);
+                    }
+                }
                 await sel.editReply({ content: `✅ เพิ่ม ${added} คนสำเร็จ`, components: [] });
                 setTimeout(() => sel.deleteReply().catch(silentCatch('EditTag')), 3000);
                 return;
@@ -234,7 +242,15 @@ export function setupEditTagFeature(client: Client): void {
                     c = c.replace(new RegExp(`<@!?${id}>`, 'g'), '');
                 }
                 c = c.replace(/\s+/g, ' ').trim();
-                await msg.edit(c);
+                try {
+                    await msg.edit(c);
+                } catch {
+                    // Webhook message แก้ไม่ได้ → ลบแล้วส่งใหม่
+                    await msg.delete();
+                    if (msg.channel.isTextBased()) {
+                        await (msg.channel as import('discord.js').GuildTextBasedChannel).send(c);
+                    }
+                }
                 await sel.editReply({ content: `✅ ลบ ${sel.values.length} คนสำเร็จ`, components: [] });
                 setTimeout(() => sel.deleteReply().catch(silentCatch('EditTag')), 3000);
                 return;
