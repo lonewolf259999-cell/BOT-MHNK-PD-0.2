@@ -6,6 +6,7 @@ import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import type { TagInfo } from '../../types/discord';
 import { CONSTANTS } from '../../types/discord';
+import { countStates } from './count.state';
 
 /** Queued batch: accumulate count changes and flush periodically */
 interface CountOp {
@@ -161,7 +162,7 @@ export async function processCountBatch(
  */
 type RecountInteraction = CommandInteraction<'cached'> | ButtonInteraction<'cached'>;
 
-export async function manualRecount(client: Client, interaction: RecountInteraction): Promise<void> {
+export async function manualRecount(client: Client, interaction: RecountInteraction, abortSignal?: AbortSignal): Promise<void> {
     return locks.count.run(async () => {
         const cfg = configService.getCountConfig();
         if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) {
@@ -220,6 +221,7 @@ export async function manualRecount(client: Client, interaction: RecountInteract
         const PROGRESS_INTERVAL_MS = 3000;
 
         for (const ch of channels) {
+            if (abortSignal?.aborted) break;
             if (!ch.id) continue;
 
             const channel = client.channels.cache.get(ch.id);
@@ -229,6 +231,7 @@ export async function manualRecount(client: Client, interaction: RecountInteract
             let hasMore = true;
 
             while (hasMore) {
+                if (abortSignal?.aborted) break;
                 const msgs = await channel.messages.fetch({ limit: 100, before: lastId });
                 if (msgs.size === 0) break;
 
@@ -275,7 +278,8 @@ export async function manualRecount(client: Client, interaction: RecountInteract
                 if (Date.now() - lastProgressUpdate > PROGRESS_INTERVAL_MS) {
                     lastProgressUpdate = Date.now();
                     try {
-                        await interaction.editReply({ content: `⏳ กำลังนับข้อความเก่า... ${totalMessages} ข้อความแล้ว` });
+                        const channelName = 'name' in channel ? `#${channel.name}` : 'unknown';
+                        await interaction.editReply({ content: `📂 กำลังสแกน: ${channelName}\n⏳ กำลังนับข้อความเก่า... ${totalMessages} ข้อความแล้ว` });
                     } catch { /* ignore */ }
                 }
 
@@ -284,12 +288,19 @@ export async function manualRecount(client: Client, interaction: RecountInteract
             }
         }
 
+        if (abortSignal?.aborted) {
+            countStates.stop();
+            await interaction.editReply({ content: `⏹️ หยุดนับข้อความเก่า\n📊 สแกน: ${totalMessages} ข้อความ` });
+            return;
+        }
+
         await sheetService.updateValues(
             cfg.SPREADSHEET_ID,
             `${cfg.SHEET_NAME}!A1`,
             rows
         );
 
+        countStates.stop();
         await replyAndDelete(interaction, `✅ นับข้อความเก่าเสร็จ: ${totalMessages} ข้อความ`);
         logger.info('นับเคส', `นับข้อความเก่าเสร็จ: ${totalMessages} ข้อความ`);
     });

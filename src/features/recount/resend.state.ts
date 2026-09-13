@@ -8,6 +8,11 @@ interface ResendState {
     abortController: AbortController | null;
     totalSent: number;
     totalFailed: number;
+    scanned: number;
+    bypdSent: number;
+    carrySent: number;
+    take2Sent: number;
+    currentChannel: string;
 }
 
 const states = new Map<string, ResendState>();
@@ -30,6 +35,6 @@ export const resendStates = {
         if (state?.abortController) {
             state.abortController.abort();
         }
-        states.set(guildId, { isRunning: false, abortController: null, totalSent: 0, totalFailed: 0 });
+        states.set(guildId, { isRunning: false, abortController: null, totalSent: 0, totalFailed: 0, scanned: 0, bypdSent: 0, carrySent: 0, take2Sent: 0, currentChannel: '' });
     },
 };

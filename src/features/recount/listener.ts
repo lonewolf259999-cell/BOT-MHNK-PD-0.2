@@ -1,6 +1,7 @@
 import { Client, Events, MessageFlags, ButtonInteraction, ModalSubmitInteraction, ChatInputCommandInteraction } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { manualRecount } from '../count/count.service';
+import { countStates } from '../count/count.state';
 import { createPanelEmbed, buildPanelComponents } from './panel.service';
 import { replyAndDelete, silentCatch } from '../../services/utils';
 import { buildCountModal, buildWelcomeModal, buildBypdModal, buildTake2Modal, buildRegistryModal } from './modals';
@@ -29,7 +30,7 @@ export function setupRecountFeature(client: Client): void {
                 return;
             }
             await cmd.deferReply({ flags: MessageFlags.Ephemeral });
-            await cmd.channel?.send({ embeds: [createPanelEmbed()], components: buildPanelComponents() });
+            await cmd.channel?.send({ embeds: [createPanelEmbed()], components: buildPanelComponents(cmd.guildId || 'global') });
             await replyAndDelete(cmd, '✅ วางแผงควบคุมในห้องนี้แล้ว');
             return;
         }
@@ -57,9 +58,19 @@ export function setupRecountFeature(client: Client): void {
                 return;
             }
 
-            // ⭐ เริ่มนับข้อความเก่า → manualRecount จะ defer เองภายใน
+            // ⭐ เริ่มนับข้อความเก่า → รองรับการหยุด
             if (btn.customId === 'btn_recount_manual') {
-                await manualRecount(client, btn).catch((e: unknown) => logger.error('RECOUNT', `Manual recount error: ${e instanceof Error ? e.message : String(e)}`));
+                if (countStates.isRunning()) {
+                    countStates.stop();
+                    try { await btn.deferUpdate(); } catch { /* ignore */ }
+                    await refreshPanel(btn);
+                    return;
+                }
+                const abort = new AbortController();
+                countStates.start(abort);
+                await refreshPanel(btn);
+                await manualRecount(client, btn, abort.signal).catch((e: unknown) => logger.error('RECOUNT', `Manual recount error: ${e instanceof Error ? e.message : String(e)}`));
+                await refreshPanel(btn);
                 return;
             }
 
@@ -67,7 +78,7 @@ export function setupRecountFeature(client: Client): void {
             if (btn.customId === 'btn_refresh_config') {
                 try { await btn.deferUpdate(); } catch { return; }
                 await configService.reload();
-                try { await btn.editReply({ embeds: [createPanelEmbed()], components: buildPanelComponents() }); } catch (e) { logger.warn('Recount', String(e)); }
+                try { await btn.editReply({ embeds: [createPanelEmbed()], components: buildPanelComponents(btn.guildId || 'global') }); } catch (e) { logger.warn('Recount', String(e)); }
                 return;
             }
 
@@ -83,12 +94,12 @@ export function setupRecountFeature(client: Client): void {
                     return;
                 }
                 const abort = new AbortController();
-                resendStates.set(guildId, { isRunning: true, abortController: abort, totalSent: 0, totalFailed: 0 });
+                resendStates.set(guildId, { isRunning: true, abortController: abort, totalSent: 0, totalFailed: 0, scanned: 0, bypdSent: 0, carrySent: 0, take2Sent: 0, currentChannel: '' });
                 await refreshPanel(btn);
-                await btn.editReply({ content: '🔄 กำลังส่งย้อนหลัง BYPD...\n⏳ กำลังสแกนห้อง Log...' });
+                await btn.editReply({ content: '🔄 กำลังส่งย้อนหลัง BYPD...\n⏳ กำลังเริ่มสแกน...' });
                 try {
-                    const r = await runResendMissed(btn, abort.signal);
-                    resendStates.set(guildId, { isRunning: false, abortController: null, totalSent: r.sent, totalFailed: r.failed });
+                    const r = await runResendMissed(btn, abort.signal, guildId);
+                    resendStates.set(guildId, { isRunning: false, abortController: null, totalSent: r.sent, totalFailed: r.failed, scanned: 0, bypdSent: 0, carrySent: 0, take2Sent: 0, currentChannel: '' });
                     await refreshPanel(btn);
                     await replyAndDelete(btn, r.message);
                 } catch (err: unknown) {
@@ -114,7 +125,7 @@ export function setupRecountFeature(client: Client): void {
                 const save = async (keys: [string, string][]) => {
                     await configService.writeConfigKeys(keys);
                     if (modal.message) {
-                        try { await modal.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents() }); } catch (e) { logger.warn('Recount', String(e)); }
+                        try { await modal.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents(modal.guildId || 'global') }); } catch (e) { logger.warn('Recount', String(e)); }
                     }
                 };
                 switch (modal.customId) {
@@ -172,7 +183,7 @@ export function setupRecountFeature(client: Client): void {
 async function refreshPanel(interaction: ButtonInteraction<'cached'>): Promise<void> {
     try {
         if (interaction.message) {
-            await interaction.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents() });
+            await interaction.message.edit({ embeds: [createPanelEmbed()], components: buildPanelComponents(interaction.guildId || 'global') });
         }
     } catch (e) { logger.warn('Recount', String(e)); }
 }
@@ -183,18 +194,38 @@ interface ResendResult {
     message: string;
 }
 
-async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal): Promise<ResendResult> {
+async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSignal: AbortSignal, guildId: string): Promise<ResendResult> {
     const logCaseId = configService.getLogCaseChannelId();
     const logTake2Id = configService.getLogTake2ChannelId();
     const guild = interaction.guild;
     if (!logCaseId && !logTake2Id) return { sent: 0, failed: 0, message: '❌ ไม่พบห้อง Log' };
     let scanned = 0, bypdSent = 0, carrySent = 0, take2Sent = 0, failed = 0, bypdAlready = 0, carryAlready = 0, take2Already = 0;
     let proctorSent = 0, proctorAlready = 0;
+
+    const updateProgress = async (channelName: string) => {
+        resendStates.set(guildId, {
+            ...resendStates.get(guildId)!,
+            scanned,
+            bypdSent,
+            carrySent,
+            take2Sent,
+            currentChannel: channelName,
+        });
+        try {
+            await interaction.editReply({
+                content: `📂 กำลังสแกน: ${channelName}\n📊 สแกน: ${scanned} | BYPD: ${bypdSent} | Carry: ${carrySent} | TAKE2: ${take2Sent} | ❌ ${failed}`,
+            });
+        } catch { /* ignore rate limit */ }
+    };
+
     const scanChannel = async (channelId: string) => {
         if (!guild) return;
         const logChannel = guild.channels.cache.get(channelId);
         if (!logChannel || !logChannel.isTextBased()) return;
+        const channelName = `#${logChannel.name}`;
+        await updateProgress(channelName);
         let lastId: string | undefined;
+        let batchCount = 0;
         while (true) {
             if (abortSignal.aborted) break;
             const messages = await logChannel.messages.fetch({ limit: 100, before: lastId });
@@ -227,11 +258,13 @@ async function runResendMissed(interaction: ButtonInteraction<'cached'>, abortSi
                 }
             }
             scanned += batch.length;
+            batchCount++;
+            if (batchCount % 1 === 0) await updateProgress(channelName);
             lastId = messages.last()?.id;
         }
     };
     if (logCaseId) await scanChannel(logCaseId);
-    if (logTake2Id) await scanChannel(logTake2Id);
+    if (logTake2Id && !abortSignal.aborted) await scanChannel(logTake2Id);
     const totalSent = bypdSent + carrySent + take2Sent;
     return {
         sent: totalSent,

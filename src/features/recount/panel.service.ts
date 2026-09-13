@@ -1,6 +1,7 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { configService } from '../../core/config.service';
 import { resendStates } from './resend.state';
+import { countStates } from '../count/count.state';
 
 export function createPanelEmbed(): EmbedBuilder {
     const count = configService.getCountConfig();
@@ -36,13 +37,16 @@ export function createPanelEmbed(): EmbedBuilder {
         .setFooter({ text: 'กดปุ่มด้านล่างเพื่อตั้งค่าหรือเริ่มนับข้อความเก่า' });
 }
 
-export function buildPanelComponents(): ActionRowBuilder<ButtonBuilder>[] {
-    // Use a generic guildId for resend state tracking
-    const running = resendStates.isRunning('global');
+export function buildPanelComponents(guildId: string = 'global'): ActionRowBuilder<ButtonBuilder>[] {
+    const resendRunning = resendStates.isRunning(guildId);
+    const countRunning = countStates.isRunning();
 
     return [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('btn_recount_manual').setLabel('⭐ เริ่มนับข้อความเก่า').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId('btn_recount_manual')
+                .setLabel(countRunning ? '⏹️ หยุดทำงาน' : '⭐ เริ่มนับข้อความเก่า')
+                .setStyle(countRunning ? ButtonStyle.Danger : ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('btn_cfg_count').setLabel('📊 ตั้งค่า — นับเคส').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('btn_cfg_welcome').setLabel('🚪 ตั้งค่า — ต้อนรับ').setStyle(ButtonStyle.Secondary),
         ),
@@ -55,8 +59,8 @@ export function buildPanelComponents(): ActionRowBuilder<ButtonBuilder>[] {
         new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
                 .setCustomId('btn_resend_bypd')
-                .setLabel(running ? '⏹️ หยุดทำงาน' : '🔄 ส่งย้อนหลัง BYPD')
-                .setStyle(running ? ButtonStyle.Danger : ButtonStyle.Primary)
+                .setLabel(resendRunning ? '⏹️ หยุดทำงาน' : '🔄 ส่งย้อนหลัง BYPD')
+                .setStyle(resendRunning ? ButtonStyle.Danger : ButtonStyle.Primary)
         ),
     ];
 }
