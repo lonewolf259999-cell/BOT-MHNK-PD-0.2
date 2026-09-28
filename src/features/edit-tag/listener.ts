@@ -16,6 +16,7 @@ import {
     StringSelectMenuInteraction,
     TextChannel,
     Message,
+    Interaction,
 } from 'discord.js';
 import { findMembersByCode } from '../../services/member.service';
 import { rateLimiter } from '../../core/ratelimiter';
@@ -24,6 +25,46 @@ import { PermissionService } from '../../services/permission.service';
 import { silentCatch } from '../../services/utils';
 
 type CachedInteraction = MessageContextMenuCommandInteraction<'cached'>;
+
+export type ErrorReplyMode = 'reply' | 'editReply' | 'followUp' | 'skip';
+
+/**
+ * เลือกวิธีแจ้งข้อผิดพลาดให้ตรงกับสถานะของ interaction
+ *
+ * Discord ยอมให้ตอบครั้งเดียว และวิธีตอบต้องตรงสถานะ ไม่งั้นโดนปฏิเสธ
+ *   ยังไม่ตอบ         → reply
+ *   บอก "รอแป๊บ" แล้ว  → editReply  (ฟีเจอร์นี้บอกรอแป๊บไว้ถึง 5 จุดก่อนเริ่มทำงานจริง)
+ *   ตอบไปแล้ว         → followUp
+ *
+ * ของเดิมเช็คแค่ "ตอบไปแล้วหรือยัง" แล้วใช้ reply เสมอ พอพังหลังบอกรอแป๊บ
+ * Discord ปฏิเสธ ข้อความหายเงียบ ผู้ใช้ค้างอยู่ที่ "กำลังคิด..." จนขึ้นว่าแอปไม่ตอบสนอง
+ */
+export function pickErrorReplyMode(state: { repliable: boolean; replied: boolean; deferred: boolean }): ErrorReplyMode {
+    if (!state.repliable) return 'skip';
+    if (state.replied) return 'followUp';
+    if (state.deferred) return 'editReply';
+    return 'reply';
+}
+
+/** แจ้งข้อผิดพลาดให้ผู้ใช้เห็นจริง ไม่ใช่ปล่อยค้างที่ "กำลังคิด..." */
+async function notifyError(i: Interaction): Promise<void> {
+    const mode = pickErrorReplyMode({
+        repliable: i.isRepliable(),
+        replied: 'replied' in i ? Boolean(i.replied) : false,
+        deferred: 'deferred' in i ? Boolean(i.deferred) : false,
+    });
+    if (mode === 'skip' || !i.isRepliable()) return;
+
+    const content = '❌ เกิดข้อผิดพลาด';
+    try {
+        if (mode === 'followUp') await i.followUp({ content, flags: MessageFlags.Ephemeral });
+        // ล้างปุ่ม/เมนูที่ค้างอยู่ด้วย เพราะมันใช้ต่อไม่ได้แล้ว
+        else if (mode === 'editReply') await i.editReply({ content, components: [] });
+        else await i.reply({ content, flags: MessageFlags.Ephemeral });
+    } catch (e) {
+        logger.warn('แก้แท็ก', `แจ้งข้อผิดพลาดให้ผู้ใช้ไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
 
 /**
  * Fetch message by channelId and messageId helper.
@@ -267,9 +308,7 @@ export function setupEditTagFeature(client: Client): void {
             }
         } catch (e) {
             logger.error('แก้แท็ก', `ผิดพลาด: ${e instanceof Error ? e.message : String(e)}`);
-            if ('reply' in i && typeof i.reply === 'function' && !i.replied) {
-                await i.reply({ content: '❌ เกิดข้อผิดพลาด', flags: MessageFlags.Ephemeral }).catch(silentCatch('EditTag'));
-            }
+            await notifyError(i);
         }
     });
 }
