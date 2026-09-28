@@ -59,26 +59,32 @@ export function setupEditPdFeature(client: Client): void {
                     info = await findMemberByDiscordId(uid);
                 }
 
+                // ไม่เจอชื่อในชีต = เขียนอะไรลงชีตไม่ได้เลย ต้องบอกตรง ๆ
+                // ของเดิมข้ามการเขียนไปเงียบ ๆ แล้วยังตอบว่า "อัปเดตสำเร็จ"
+                if ((newName || newPhone) && !info) {
+                    await modal.editReply({
+                        content: '❌ ไม่พบชื่อคุณในชีตลงทะเบียน จึงยังแก้ไขให้ไม่ได้\nกรุณาติดต่อ Admin เพื่อตรวจสอบข้อมูลในระบบ',
+                    });
+                    return;
+                }
+
                 // แก้ชื่อลง NamePD + Nickname
-                if (newName) {
-                    if (info) {
-                        const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
-                        await updateMemberName(info.row, full);
-                        try { await modal.member.setNickname(truncateNickname(full)); } catch (e) { logger.warn('EditPD', String(e)); }
-                    }
+                if (newName && info) {
+                    const full = `${info.codeNumber} [MHNK-PD] ${newName}`;
+                    await updateMemberName(info.row, full);
+                    try { await modal.member.setNickname(truncateNickname(full)); } catch (e) { logger.warn('EditPD', String(e)); }
                     changed.push(`ชื่อ IC → **${newName}**`);
                 }
 
                 // แก้เบอร์โทรลง NamePD คอลัมน์ B
-                if (newPhone) {
-                    if (info) {
-                        await updateMemberPhone(info.row, newPhone);
-                    }
+                if (newPhone && info) {
+                    await updateMemberPhone(info.row, newPhone);
                     changed.push(`เบอร์โทร → **${newPhone}**`);
                 }
 
+                // อายุเก็บไว้ในกล่องข้อความ Discord อย่างเดียว ไม่ได้ลงชีต — บอกให้ตรงตามจริง
                 if (newAge) {
-                    changed.push(`อายุ → **${newAge}**`);
+                    changed.push(`อายุ → **${newAge}** _(แสดงในกล่องข้อความเท่านั้น ไม่ได้บันทึกลงชีต)_`);
                 }
 
                 // อัปเดต embed ใน Log Channel (ทางเลือก — ถ้าไม่เจอ ไม่ error)

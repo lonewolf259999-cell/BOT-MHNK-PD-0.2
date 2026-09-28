@@ -15,8 +15,7 @@ export class MemoryCache {
         const entry = this.store.get(key);
         if (!entry) return null;
         if (Date.now() > entry.expires) {
-            this.store.delete(key);
-            this.updateAccessOrder(key);
+            this.delete(key);
             return null;
         }
         this.updateAccessOrder(key);
@@ -27,9 +26,11 @@ export class MemoryCache {
         if (this.store.has(key)) {
             this.updateAccessOrder(key);
         } else {
-            if (this.store.size >= this.maxSize) {
+            // ไล่ทิ้งจนเหลือที่ว่างจริง ๆ — ใช้ while เพราะถ้าคิวกับ store หลุดกันเมื่อไหร่
+            // การ shift ครั้งเดียวอาจได้ key ที่ไม่มีใน store แล้ว ลบไปก็ไม่ได้ที่ว่างเพิ่ม
+            while (this.store.size >= this.maxSize && this.accessOrder.length > 0) {
                 const oldest = this.accessOrder.shift();
-                if (oldest) this.store.delete(oldest);
+                if (oldest !== undefined) this.store.delete(oldest);
             }
             this.accessOrder.push(key);
         }
@@ -38,7 +39,7 @@ export class MemoryCache {
 
     delete(key: string): void {
         this.store.delete(key);
-        this.updateAccessOrder(key);
+        this.removeFromAccessOrder(key);
     }
 
     deleteByPrefix(prefix: string): void {
@@ -57,9 +58,21 @@ export class MemoryCache {
         return this.store.size;
     }
 
-    private updateAccessOrder(key: string): void {
+    /** เอา key ออกจากคิว — ใช้ตอนลบของออกจาก store */
+    private removeFromAccessOrder(key: string): void {
         const idx = this.accessOrder.indexOf(key);
         if (idx !== -1) this.accessOrder.splice(idx, 1);
+    }
+
+    /**
+     * ย้าย key ไปท้ายคิว (= เพิ่งถูกใช้)
+     *
+     * ห้ามเรียกตัวนี้หลังลบ key ออกจาก store เด็ดขาด เพราะมันจะ push key กลับเข้าคิว
+     * ทำให้คิวมี key ที่ไม่มีใน store แล้ว พอถึงเวลา evict จะ shift ได้ key ตายมาลบ
+     * ซึ่งไม่ได้ที่ว่างเพิ่มเลย ผลคือ store โตเกิน maxSize ไปเรื่อย ๆ
+     */
+    private updateAccessOrder(key: string): void {
+        this.removeFromAccessOrder(key);
         this.accessOrder.push(key);
     }
 }

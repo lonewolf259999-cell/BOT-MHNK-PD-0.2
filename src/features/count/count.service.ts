@@ -17,8 +17,23 @@ interface CountOp {
 
 let countQueue: CountOp[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushFailures = 0;
 
-function scheduleFlush(): void {
+const FLUSH_DELAY_MS = 3000;
+/** เพดานการถอยห่าง — 3 วิ → 6 → 12 → 24 → 48 วิ แล้วคาที่ 48 วิ */
+const MAX_BACKOFF_STEPS = 4;
+
+/** หน่วงก่อนลองเขียนใหม่ ยิ่งพลาดติดกันยิ่งถอยห่าง กันยิง Google ซ้ำ ๆ ตอนมันล่ม */
+export function flushDelayFor(failures: number): number {
+    return FLUSH_DELAY_MS * 2 ** Math.min(Math.max(failures, 0), MAX_BACKOFF_STEPS);
+}
+
+/** จำนวนยอดที่ยังค้างในคิว ยังไม่ได้เขียนลงชีต */
+export function pendingCountOps(): number {
+    return countQueue.length;
+}
+
+function scheduleFlush(delayMs = FLUSH_DELAY_MS): void {
     if (flushTimer) return;
     flushTimer = setTimeout(async () => {
         flushTimer = null;
@@ -27,52 +42,147 @@ function scheduleFlush(): void {
         } catch (e) {
             logger.error('นับเคส', `flush error: ${e}`);
         }
-    }, 3000);
+    }, delayMs);
+}
+
+/**
+ * เขียนยอดที่ยังค้างในคิวลงชีตทันที ไม่ต้องรอครบ 3 วินาที
+ * ใช้ตอนปิดบอท เพื่อไม่ให้ยอดที่ยังอยู่ในหน่วยความจำหายไปพร้อมกับ process
+ */
+export async function flushPendingCounts(): Promise<void> {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    await flushCountQueue();
 }
 
 async function flushCountQueue(): Promise<void> {
-    const ops = countQueue;
-    countQueue = [];
-    if (ops.length === 0) return;
+    if (countQueue.length === 0) return;
 
-    await locks.countBatch.run(async () => {
+    // ใช้กุญแจตัวเดียวกับ manualRecount เพื่อไม่ให้สองระบบเขียนชีตทับกัน
+    // ของเดิมใช้คนละดอก (countBatch กับ count) จึงไม่ได้กันกันเลย ระหว่างนับใหม่ที่กินเวลาเป็นนาที
+    // นับสดยังเขียนแทรกได้ แล้วโดนนับใหม่เขียนทับด้วยข้อมูลที่อ่านไว้ตั้งแต่ก่อนเริ่ม
+    await locks.count.run(async () => {
         const cfg = configService.getCountConfig();
         if (!cfg.SPREADSHEET_ID || !cfg.SHEET_NAME) return;
 
-        const chMap: Record<string, number> = {
-            [cfg.CHANNELS.CHANNEL_1]: 2,
-            [cfg.CHANNELS.CHANNEL_2]: 3,
-            [cfg.CHANNELS.CHANNEL_3]: 4,
-            [cfg.CHANNELS.CHANNEL_4]: 5,
-            [cfg.CHANNELS.CHANNEL_5]: 6,
-        };
+        // ดึงของออกจากคิวหลังได้กุญแจแล้วเท่านั้น
+        // ระหว่างรอ ของจะกองรวมเป็นก้อนเดียว พอถึงคิวก็เขียนทีเดียวจบ
+        // ไม่ใช่ทยอยเขียนทีละรอบจนยิง Google รัวเป็นร้อยครั้ง
+        const ops = countQueue;
+        countQueue = [];
+        if (ops.length === 0) return;
 
-        const byChannel = new Map<string, typeof ops>();
-        for (const op of ops) {
-            const arr = byChannel.get(op.channelId);
-            if (arr) arr.push(op);
-            else byChannel.set(op.channelId, [op]);
+        try {
+            await writeCountOps(ops, cfg);
+            flushFailures = 0;
+        } catch (err) {
+            // เขียนชีตไม่สำเร็จ — เอาของกลับเข้าคิวไว้หน้าสุด แล้วนัดลองใหม่แบบถอยห่างขึ้นเรื่อย ๆ
+            // ของเดิมตัดคิวทิ้งตั้งแต่ก่อนเขียน พอเขียนพลาดยอดรอบนั้นจึงหายถาวร
+            countQueue = [...ops, ...countQueue];
+            flushFailures++;
+            scheduleFlush(flushDelayFor(flushFailures));
+            throw err;
         }
-
-        const rows = await sheetService.getValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A:G`, 0);
-        while (rows.length < CONSTANTS.COUNT_DATA_START) rows.push([]);
-        if (rows[CONSTANTS.COUNT_DATA_START - 1]?.length < 7 || !rows[CONSTANTS.COUNT_DATA_START - 1]?.[0]) {
-            rows[CONSTANTS.COUNT_DATA_START - 1] = CONSTANTS.COUNT_HEADER;
-        }
-
-        for (const [channelId, channelOps] of byChannel) {
-            const colIdx = chMap[channelId];
-            if (colIdx === undefined) continue;
-            for (const op of channelOps) {
-                const rowIdx = ensureUserRow(rows, op.tag);
-                const currentVal = parseInt(rows[rowIdx][colIdx] || '0') || 0;
-                const newVal = currentVal + (op.isDelete ? -1 : 1);
-                rows[rowIdx][colIdx] = newVal > 0 ? newVal.toString() : '';
-            }
-        }
-
-        await sheetService.updateValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A1`, rows);
     });
+}
+
+type CountConfig = ReturnType<typeof configService.getCountConfig>;
+
+/** อ่านชีต บวก/ลบยอด แล้วเขียนกลับเฉพาะแถวที่เปลี่ยน */
+async function writeCountOps(ops: CountOp[], cfg: CountConfig): Promise<void> {
+    const chMap: Record<string, number> = {
+        [cfg.CHANNELS.CHANNEL_1]: 2,
+        [cfg.CHANNELS.CHANNEL_2]: 3,
+        [cfg.CHANNELS.CHANNEL_3]: 4,
+        [cfg.CHANNELS.CHANNEL_4]: 5,
+        [cfg.CHANNELS.CHANNEL_5]: 6,
+    };
+
+    const byChannel = new Map<string, CountOp[]>();
+    for (const op of ops) {
+        const arr = byChannel.get(op.channelId);
+        if (arr) arr.push(op);
+        else byChannel.set(op.channelId, [op]);
+    }
+
+    const rows = await sheetService.getValues(cfg.SPREADSHEET_ID, `${cfg.SHEET_NAME}!A:G`, 0);
+    while (rows.length < CONSTANTS.COUNT_DATA_START) rows.push([]);
+
+    const headerIdx = CONSTANTS.COUNT_DATA_START - 1;
+    let headerWritten = false;
+    if (rows[headerIdx]?.length < 7 || !rows[headerIdx]?.[0]) {
+        rows[headerIdx] = [...CONSTANTS.COUNT_HEADER];
+        headerWritten = true;
+    }
+
+    // จำไว้ว่าแถวเดิมมีกี่แถว และแถวไหนบ้างที่ถูกแตะ
+    // เพื่อจะเขียนกลับเฉพาะแถวนั้น แทนการส่งทั้งตารางกลับไปทุก 3 วินาที
+    const existingRowCount = rows.length;
+    const touched = new Set<number>();
+
+    for (const [channelId, channelOps] of byChannel) {
+        const colIdx = chMap[channelId];
+        if (colIdx === undefined) continue;
+        for (const op of channelOps) {
+            const rowIdx = ensureUserRow(rows, op.tag);
+            const currentVal = parseInt(rows[rowIdx][colIdx] || '0') || 0;
+            const newVal = currentVal + (op.isDelete ? -1 : 1);
+            rows[rowIdx][colIdx] = newVal > 0 ? newVal.toString() : '';
+            touched.add(rowIdx);
+        }
+    }
+
+    const updates = buildCountUpdates(cfg.SHEET_NAME, rows, touched, existingRowCount, headerWritten);
+    if (updates.length > 0) {
+        await sheetService.batchUpdateValues(cfg.SPREADSHEET_ID, updates);
+    }
+}
+
+export interface SheetRangeUpdate {
+    range: string;
+    values: string[][];
+}
+
+/** เติมช่องที่ขาดหรือเป็นรูโหว่ให้ครบ 7 คอลัมน์ (A–G) ให้รูปร่างตรงกับ range ที่จะเขียน */
+function toFullRow(row: string[] | undefined): string[] {
+    const out: string[] = [];
+    for (let c = 0; c < 7; c++) out.push(row?.[c] ?? '');
+    return out;
+}
+
+/**
+ * สร้างรายการ range ที่ต้องเขียนจริง แทนการส่งทั้งตารางกลับไปทุกครั้ง
+ *   - แถวเดิมที่ถูกแก้ → เขียนทีละแถว A{n}:G{n}
+ *   - แถวใหม่ที่เพิ่มต่อท้าย → รวมเป็นบล็อกเดียว
+ * แยกออกมาเป็น pure function เพื่อให้เทสได้โดยไม่ต้องต่อ Google Sheets
+ */
+export function buildCountUpdates(
+    sheetName: string,
+    rows: string[][],
+    touched: Set<number>,
+    existingRowCount: number,
+    headerWritten: boolean,
+): SheetRangeUpdate[] {
+    const updates: SheetRangeUpdate[] = [];
+
+    if (headerWritten) {
+        const r = CONSTANTS.COUNT_DATA_START; // index 2 (0-based) = แถวที่ 3 ของชีต
+        updates.push({ range: `${sheetName}!A${r}:G${r}`, values: [toFullRow(rows[r - 1])] });
+    }
+
+    const existingTouched = [...touched].filter(i => i < existingRowCount).sort((a, b) => a - b);
+    for (const idx of existingTouched) {
+        const r = idx + 1; // index 0-based → เลขแถวของชีต (1-based)
+        updates.push({ range: `${sheetName}!A${r}:G${r}`, values: [toFullRow(rows[idx])] });
+    }
+
+    if (rows.length > existingRowCount) {
+        updates.push({
+            range: `${sheetName}!A${existingRowCount + 1}:G${rows.length}`,
+            values: rows.slice(existingRowCount).map(toFullRow),
+        });
+    }
+
+    return updates;
 }
 
 /*
@@ -105,6 +215,9 @@ export function findRowById(rows: string[][], userId: string): number {
 function findRowByName(rows: string[][], tag: TagInfo): number {
     const n = normalizeName(tag.nickname);
     const u = normalizeName(tag.username);
+    // ไม่มีชื่อให้เทียบ ก็อย่าเดา — includes('') เป็นจริงกับทุกชื่อ
+    // ถ้าปล่อยผ่านจะไปเจอแถวแรกที่มีชื่อ แล้วบวก/หักยอดผิดคน
+    if (!n && !u) return -1;
     for (let i = CONSTANTS.COUNT_DATA_START; i < rows.length; i++) {
         const nameCell = rows[i]?.[0]; // Column A = display name
         const idCell = rows[i]?.[1];   // Column B = User ID (may be empty in old data)

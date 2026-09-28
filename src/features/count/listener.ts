@@ -6,7 +6,13 @@ import { logger } from '../../core/logger';
 import { CACHE } from '../../config';
 import type { TagInfo } from '../../types/discord';
 
-const messageLog = new Map<string, TagInfo[]>();
+/**
+ * จำว่าโพสไหนนับให้ใครไปแล้ว — เก็บเฉพาะ "รหัสคน" ไม่เก็บชื่อเล่น
+ *
+ * ชื่อเล่นไม่ต้องจำ เพราะตอนใช้งานจริงดึงจากข้อความสด ๆ ได้อยู่แล้ว
+ * เก็บแค่รหัสทำให้จำโพสได้มากขึ้นราว 3 เท่าในหน่วยความจำเท่าเดิม
+ */
+const messageLog = new Map<string, string[]>();
 
 function getTagsFromMessage(content: string, guild: Guild): TagInfo[] {
     const tags: TagInfo[] = [];
@@ -23,6 +29,48 @@ function getTagsFromMessage(content: string, guild: Guild): TagInfo[] {
         }
     }
     return tags;
+}
+
+function allowedChannelIds(cfg: ReturnType<typeof configService.getCountConfig>): string[] {
+    const ch = cfg.CHANNELS;
+    return [ch.CHANNEL_1, ch.CHANNEL_2, ch.CHANNEL_3, ch.CHANNEL_4, ch.CHANNEL_5].filter(Boolean);
+}
+
+export interface TagDelta {
+    added: TagInfo[];
+    removedIds: string[];
+}
+
+/**
+ * ส่วนต่างของแท็กระหว่างของเดิมกับของใหม่ ใช้ตอนมีคนแก้ข้อความ
+ *
+ * knownIds = undefined แปลว่าไม่เคยเห็นข้อความนี้ใน messageLog — คืนส่วนต่างเปล่า
+ * เพราะเราไม่รู้ว่าเดิมแท็กใครไว้ ถ้าเหมาว่าแท็กปัจจุบันทั้งหมดคือ "ของที่เพิ่งเพิ่ม"
+ * คะแนนจะไปซ้ำกับที่นับไปแล้วตอนข้อความถูกส่งครั้งแรก
+ */
+export function diffTags(knownIds: string[] | undefined, next: TagInfo[]): TagDelta {
+    if (!knownIds) return { added: [], removedIds: [] };
+    const oldIds = new Set(knownIds);
+    const newIds = new Set(next.map(x => x.id));
+    return {
+        added: next.filter(x => !oldIds.has(x.id)),
+        removedIds: knownIds.filter(id => !newIds.has(id)),
+    };
+}
+
+/**
+ * คนที่ถูกเอาออกจากแท็ก — เราจำไว้แค่รหัส ต้องหาข้อมูลคนกลับมาเพื่อส่งให้ระบบนับ
+ * หาไม่เจอ (เช่นลาออกไปแล้ว) ก็ยังหักยอดได้ เพราะแถวในชีตค้นด้วยรหัสเป็นหลักอยู่แล้ว
+ */
+function toRemovedTags(ids: string[], guild: Guild): TagInfo[] {
+    return ids.map(id => {
+        const member = guild.members.cache.get(id);
+        return {
+            id,
+            nickname: member ? (member.nickname || member.displayName || member.user.username).trim() : '',
+            username: member ? member.user.username : '',
+        };
+    });
 }
 
 function cleanupLog(): void {
@@ -46,13 +94,12 @@ export function setupCountFeature(client: Client): void {
         try {
             const cfg = configService.getCountConfig();
             if (!configService.isLoaded() || !cfg.CHANNELS) return;
-            const allowed = [cfg.CHANNELS.CHANNEL_1, cfg.CHANNELS.CHANNEL_2, cfg.CHANNELS.CHANNEL_3, cfg.CHANNELS.CHANNEL_4, cfg.CHANNELS.CHANNEL_5].filter(Boolean);
-            if (!message.guild || !allowed.includes(message.channel.id)) return;
+            if (!message.guild || !allowedChannelIds(cfg).includes(message.channel.id)) return;
             const tags = getTagsFromMessage(message.content, message.guild);
             if (tags.length === 0) return;
             await message.react('✅').catch(silentCatch('Count'));
             if (messageLog.has(message.id)) return;
-            messageLog.set(message.id, tags);
+            messageLog.set(message.id, tags.map(t => t.id));
             cleanupLog();
             await processCountBatch(tags, message.channel.id, false);
         } catch (e: unknown) {
@@ -64,11 +111,11 @@ export function setupCountFeature(client: Client): void {
         try {
             const cfg = configService.getCountConfig();
             if (!configService.isLoaded() || !cfg.CHANNELS) return;
-            const tags = messageLog.get(message.id);
-            if (!tags) return;
+            const ids = messageLog.get(message.id);
+            if (!ids || !message.guild) return;
             messageLog.delete(message.id);
             cleanupLog();
-            await processCountBatch(tags, message.channel.id, true);
+            await processCountBatch(toRemovedTags(ids, message.guild), message.channel.id, true);
         } catch (e: unknown) {
             logger.error('นับเคส', `MessageDelete: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -83,23 +130,32 @@ export function setupCountFeature(client: Client): void {
             const cfg = configService.getCountConfig();
             if (!configService.isLoaded() || !cfg.CHANNELS || !newM.guild || !newM.channel) return;
 
-            const oldTags = messageLog.get(newM.id) || [];
+            // ของเดิมไม่ได้กรองห้องตรงนี้ ทำให้แก้ข้อความห้องไหนในเซิร์ฟเวอร์ก็เข้าคิวนับหมด
+            // สุดท้ายถูกข้ามตอน flush ก็จริง แต่ flush อ่าน Sheet ไปเรียบร้อยแล้วทุกครั้ง = เปลืองโควต้าเปล่า ๆ
+            if (!allowedChannelIds(cfg).includes(newM.channel.id)) return;
+
             const newTags = getTagsFromMessage(newM.content || '', newM.guild);
+            const known = messageLog.get(newM.id);
 
-            const oldIds = new Set(oldTags.map(x => x.id));
-            const newIds = new Set(newTags.map(x => x.id));
+            // ไม่เคยเห็นข้อความนี้ (messageLog อยู่ใน memory ล้วน บอทรีสตาร์ทแล้วหายหมด)
+            // → บันทึกสถานะปัจจุบันไว้เฉย ๆ ไม่นับ เพื่อไม่ให้คะแนนซ้ำกับตอนที่นับไปแล้ว
+            //    ถ้ายอดเพี้ยนจริงยังใช้ /recount รื้อนับใหม่ได้เสมอ
+            if (!known) {
+                messageLog.set(newM.id, newTags.map(t => t.id));
+                cleanupLog();
+                return;
+            }
 
-            const added = newTags.filter(x => !oldIds.has(x.id));
-            const removed = oldTags.filter(x => !newIds.has(x.id));
+            const { added, removedIds } = diffTags(known, newTags);
 
             if (added.length > 0) {
                 await processCountBatch(added, newM.channel.id, false);
             }
-            if (removed.length > 0) {
-                await processCountBatch(removed, newM.channel.id, true);
+            if (removedIds.length > 0) {
+                await processCountBatch(toRemovedTags(removedIds, newM.guild), newM.channel.id, true);
             }
 
-            messageLog.set(newM.id, newTags);
+            messageLog.set(newM.id, newTags.map(t => t.id));
         } catch (e: unknown) {
             logger.error('นับเคส', `MessageUpdate: ${e instanceof Error ? e.message : String(e)}`);
         }

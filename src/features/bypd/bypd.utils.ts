@@ -1,31 +1,27 @@
 import type { APIEmbed, Message } from 'discord.js';
+import { embedHasText, hasWordUpper, hasWordExact, matchesPattern } from '../../services/embed-search';
+
+/** รูปแบบรหัส PD — แยกให้ไม่ชนกับคำว่า BYPD */
+const PD_CODE = /\bPD\s+\d{2,3}/i;
 
 /** ตรวจว่า embed มีคำว่า BYPD หรือไม่ */
 export function hasBypdInEmbed(embed: APIEmbed): boolean {
-    if (embed.title?.toUpperCase().includes('BYPD')) return true;
-    if (embed.description?.toUpperCase().includes('BYPD')) return true;
-    if (embed.fields?.some((f) => f.name?.toUpperCase().includes('BYPD') || f.value?.toUpperCase().includes('BYPD'))) return true;
-    if (embed.footer?.text?.toUpperCase().includes('BYPD')) return true;
-    return false;
+    return embedHasText(embed, hasWordUpper('BYPD'));
 }
 
 /** ตรวจว่า embed มี PD หรือไม่ (ใช้ regex เพื่อไม่ให้ชนกับ BYPD) */
 export function hasPdInEmbed(embed: APIEmbed): boolean {
-    const pdRegex = /\bPD\s+\d{2,3}/i;
-    if (pdRegex.test(embed.title || '')) return true;
-    if (pdRegex.test(embed.description || '')) return true;
-    if (embed.fields?.some((f) => pdRegex.test(f.name || '') || pdRegex.test(f.value || ''))) return true;
-    if (pdRegex.test(embed.footer?.text || '')) return true;
-    return false;
+    return embedHasText(embed, matchesPattern(PD_CODE));
 }
 
 /** ตรวจว่า embed มีคำว่า อุ้มห่อ หรือไม่ */
 export function hasCarryInEmbed(embed: APIEmbed): boolean {
-    if (embed.title?.includes('อุ้มห่อ')) return true;
-    if (embed.description?.includes('อุ้มห่อ')) return true;
-    if (embed.fields?.some((f) => f.name?.includes('อุ้มห่อ') || f.value?.includes('อุ้มห่อ'))) return true;
-    if (embed.footer?.text?.includes('อุ้มห่อ')) return true;
-    return false;
+    return embedHasText(embed, hasWordExact('อุ้มห่อ'));
+}
+
+/** ตรวจว่า embed มีคำว่า TAKE2 หรือไม่ */
+export function hasTake2InEmbed(embed: APIEmbed): boolean {
+    return embedHasText(embed, hasWordUpper('TAKE2'));
 }
 
 /** ตรวจว่าข้อความหรือ embed ใดๆ มี BYPD หรือ PD หรือไม่ */
@@ -42,15 +38,6 @@ export function hasBypdOrPdInMessage(msg: Message): boolean {
 export function hasCarryInMessage(msg: Message): boolean {
     if (msg.content?.includes('อุ้มห่อ')) return true;
     return msg.embeds?.some((e) => hasCarryInEmbed(e.toJSON())) ?? false;
-}
-
-/** ตรวจว่า embed มีคำว่า TAKE2 หรือไม่ */
-export function hasTake2InEmbed(embed: APIEmbed): boolean {
-    if (embed.title?.toUpperCase().includes('TAKE2')) return true;
-    if (embed.description?.toUpperCase().includes('TAKE2')) return true;
-    if (embed.fields?.some((f) => f.name?.toUpperCase().includes('TAKE2') || f.value?.toUpperCase().includes('TAKE2'))) return true;
-    if (embed.footer?.text?.toUpperCase().includes('TAKE2')) return true;
-    return false;
 }
 
 /** ตรวจว่าข้อความหรือ embed ใดๆ มีคำว่า TAKE2 หรือไม่ */

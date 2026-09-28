@@ -20,6 +20,22 @@ const PANEL_IDS = new Set([
 
 const MODAL_BUTTONS = ['btn_cfg_count', 'btn_cfg_welcome', 'btn_cfg_bypd', 'btn_cfg_take2', 'btn_cfg_registry'];
 
+/**
+ * แผงควบคุมในห้องค้างอยู่กับสถานะรอบก่อนหรือเปล่า
+ *
+ * สถานะ "กำลังทำงาน" เก็บไว้ในหน่วยความจำ บอทรีสตาร์ทแล้วหายหมด
+ * แต่ข้อความแผงที่ค้างอยู่ในห้องยังเขียนว่า "หยุดทำงาน" เหมือนเดิม
+ * ถ้าปล่อยไว้ พอผู้ใช้กดตั้งใจจะหยุด ระบบกลับไปเริ่มงานใหม่แทน
+ */
+export function isStalePanelLabel(label: string | null | undefined, running: boolean): boolean {
+    return !running && (label ?? '').includes('หยุด');
+}
+
+function isStalePanel(btn: ButtonInteraction<'cached'>, running: boolean): boolean {
+    const label = typeof btn.component?.label === 'string' ? btn.component.label : '';
+    return isStalePanelLabel(label, running);
+}
+
 export function setupRecountFeature(client: Client): void {
     client.on(Events.InteractionCreate, async (i) => {
         // --- /recount command ---
@@ -66,10 +82,26 @@ export function setupRecountFeature(client: Client): void {
                     await refreshPanel(btn);
                     return;
                 }
+                // ปุ่มเขียนว่า "หยุดทำงาน" แต่ไม่มีอะไรทำงานอยู่จริง = แผงค้างจากรอบก่อน
+                // (บอทรีสตาร์ทระหว่างนับ สถานะในหน่วยความจำหายไป แต่ข้อความในห้องยังเป็นของเดิม)
+                // รีเฟรชแผงให้ตรงความจริง ไม่เริ่มงานใหม่ เพราะผู้ใช้ตั้งใจจะกด "หยุด"
+                if (isStalePanel(btn, false)) {
+                    try { await btn.deferUpdate(); } catch { /* ignore */ }
+                    await refreshPanel(btn);
+                    return;
+                }
                 const abort = new AbortController();
                 countStates.start(abort);
                 await refreshPanel(btn);
-                await manualRecount(client, btn, abort.signal).catch((e: unknown) => logger.error('RECOUNT', `Manual recount error: ${e instanceof Error ? e.message : String(e)}`));
+                try {
+                    await manualRecount(client, btn, abort.signal);
+                } catch (e: unknown) {
+                    logger.error('RECOUNT', `Manual recount error: ${e instanceof Error ? e.message : String(e)}`);
+                } finally {
+                    // ต้องเคลียร์เสมอ ไม่งั้นถ้านับพังกลางคัน สถานะจะค้างเป็น "กำลังนับ"
+                    // แล้วปุ่มจะติดอยู่ที่ "หยุดทำงาน" จนกว่าจะมีคนมากดซ้ำ
+                    countStates.stop();
+                }
                 await refreshPanel(btn);
                 return;
             }
@@ -91,6 +123,12 @@ export function setupRecountFeature(client: Client): void {
                     resendStates.stop(guildId);
                     await refreshPanel(btn);
                     await btn.editReply({ content: `⏹️ หยุดทำงานแล้ว\n📊 ส่งสำเร็จ: ${state.totalSent} | ล้มเหลว: ${state.totalFailed}` });
+                    return;
+                }
+                // แผงค้างจากรอบก่อน — รีเฟรชให้ตรงความจริง ไม่เริ่มส่งย้อนหลังรอบใหม่โดยที่ผู้ใช้ไม่ได้ตั้งใจ
+                if (isStalePanel(btn, false)) {
+                    await refreshPanel(btn);
+                    await btn.editReply({ content: '🔄 แผงควบคุมค้างอยู่กับรอบก่อน (บอทรีสตาร์ทระหว่างทำงาน)\n✅ รีเฟรชให้แล้ว กดใหม่ได้เลย' });
                     return;
                 }
                 const abort = new AbortController();

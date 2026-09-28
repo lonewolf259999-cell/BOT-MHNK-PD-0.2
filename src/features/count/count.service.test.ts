@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findRowById, ensureUserRow } from './count.service';
+import { findRowById, ensureUserRow, buildCountUpdates } from './count.service';
 import type { TagInfo } from '../../types/discord';
 
 const emptyRows: string[][] = [];
@@ -65,5 +65,89 @@ describe('ensureUserRow', () => {
         expect(idx).toBe(3);
         expect(rows[3][0]).toBe('NewPerson');
         expect(rows[3][1]).toBe('333');
+    });
+
+    it('ไม่มีชื่อให้เทียบ แต่รหัสตรง → ต้องเจอแถวที่ถูกต้อง', () => {
+        // ตอนหักยอดคนที่ถูกเอาแท็กออก เราจำไว้แค่รหัส ชื่ออาจว่างได้
+        const rows = structuredClone(existingRows) as string[][];
+        const tag: TagInfo = { id: '222', nickname: '', username: '' };
+        expect(ensureUserRow(rows, tag)).toBe(4); // แถวของ Alice
+    });
+
+    it('ไม่มีชื่อและรหัสไม่ตรงใคร → ห้ามไปโดนแถวแรกมั่ว', () => {
+        // ชื่อว่างเทียบแบบ "มีคำนี้อยู่ไหม" จะเป็นจริงกับทุกชื่อ
+        // ถ้าไม่กันไว้ ยอดจะไปบวก/หักผิดคน
+        const rows = structuredClone(existingRows) as string[][];
+        const before = rows.length;
+        const tag: TagInfo = { id: '999', nickname: '', username: '' };
+        const idx = ensureUserRow(rows, tag);
+        expect(idx).toBe(before);        // สร้างแถวใหม่ต่อท้าย
+        expect(rows[3][0]).toBe('John'); // แถวเดิมต้องไม่ถูกแตะ
+        expect(rows[4][0]).toBe('Alice');
+    });
+});
+
+describe('buildCountUpdates', () => {
+    const SHEET = 'ยอดเคส';
+
+    it('ไม่มีอะไรเปลี่ยน → ไม่ต้องเขียนอะไรเลย', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        const updates = buildCountUpdates(SHEET, rows, new Set(), rows.length, false);
+        expect(updates).toEqual([]);
+    });
+
+    it('แก้แถวเดิม → เขียนเฉพาะแถวนั้น ไม่แตะแถวอื่น', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        rows[4][3] = '9'; // Alice (แถวที่ 5 ของชีต) คอลัมน์ D
+        const updates = buildCountUpdates(SHEET, rows, new Set([4]), rows.length, false);
+        expect(updates).toHaveLength(1);
+        expect(updates[0].range).toBe('ยอดเคส!A5:G5');
+        expect(updates[0].values).toEqual([['Alice', '222', '2', '9', '0', '0', '0']]);
+    });
+
+    it('แก้หลายแถว → เรียงตามเลขแถว แยก range ละแถว', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        const updates = buildCountUpdates(SHEET, rows, new Set([4, 3]), rows.length, false);
+        expect(updates.map(u => u.range)).toEqual(['ยอดเคส!A4:G4', 'ยอดเคส!A5:G5']);
+    });
+
+    it('แถวใหม่ต่อท้าย → รวมเป็นบล็อกเดียว ไม่แตกเป็นรายแถว', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        rows.push(['Bob', '333', '1', '', '', '', '']);
+        rows.push(['Carol', '444', '', '1', '', '', '']);
+        const updates = buildCountUpdates(SHEET, rows, new Set([5, 6]), 5, false);
+        expect(updates).toHaveLength(1);
+        expect(updates[0].range).toBe('ยอดเคส!A6:G7');
+        expect(updates[0].values).toHaveLength(2);
+    });
+
+    it('แถวเดิม + แถวใหม่ → ได้ทั้งสองแบบในคำสั่งเดียว', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        rows[3][2] = '6';
+        rows.push(['Bob', '333', '1', '', '', '', '']);
+        const updates = buildCountUpdates(SHEET, rows, new Set([3, 5]), 5, false);
+        expect(updates.map(u => u.range)).toEqual(['ยอดเคส!A4:G4', 'ยอดเคส!A6:G6']);
+    });
+
+    it('เขียน header ใหม่ → ต้องลงแถวที่ 3 เสมอ', () => {
+        const rows = structuredClone(headerOnlyRows) as string[][];
+        const updates = buildCountUpdates(SHEET, rows, new Set(), rows.length, true);
+        expect(updates).toHaveLength(1);
+        expect(updates[0].range).toBe('ยอดเคส!A3:G3');
+        expect(updates[0].values[0][0]).toBe('ชื่อDC');
+    });
+
+    it('แถวสั้นกว่า 7 ช่อง → เติมให้ครบ ไม่ส่งค่า undefined ไปที่ Sheet', () => {
+        const rows: string[][] = [[], [], ['ชื่อDC', 'User ID'], ['Dave', '555']];
+        rows[3][4] = '2'; // เขียนข้ามช่อง ทำให้ index 2,3 เป็นรูโหว่
+        const updates = buildCountUpdates(SHEET, rows, new Set([3]), rows.length, false);
+        expect(updates[0].values).toEqual([['Dave', '555', '', '', '2', '', '']]);
+    });
+
+    it('แถวใหม่ล้วน (ชีตเปล่า) → เริ่มที่แถว 4 ตามโครงสร้างชีต', () => {
+        const rows: string[][] = [[], [], ['ชื่อDC', 'User ID', 'Take2', 'คดีปกติ', 'รถยอด', 'คุมสอบ', 'อุ้มเอ๋อ']];
+        rows.push(['Eve', '666', '1', '', '', '', '']);
+        const updates = buildCountUpdates(SHEET, rows, new Set([3]), 3, true);
+        expect(updates.map(u => u.range)).toEqual(['ยอดเคส!A3:G3', 'ยอดเคส!A4:G4']);
     });
 });

@@ -6,11 +6,12 @@ import { configService } from './core/config.service';
 import { rateLimiter } from './core/ratelimiter';
 import { logger } from './core/logger';
 import { clearAllReplyTimeouts, silentCatch } from './services/utils';
+import { flushPendingCounts, pendingCountOps } from './features/count/count.service';
 
 const errors = validate();
 if (errors.length > 0) {
     // eslint-disable-next-line no-console
-    console.error('❌ การตรวจสอบ Config ล้มเหลว:', errors.join(', '));
+    console.error('❌ การตรวจสอบ Config ล้มเหลว:\n  ' + errors.join('\n  '));
     process.exit(1);
 }
 
@@ -25,21 +26,35 @@ function safeRestart(reason: string): void {
     setTimeout(() => process.exit(1), BOT.RESTART_DELAY_MS);
 }
 
-let lastAlive = Date.now();
-function heartbeat(): void { lastAlive = Date.now(); }
+// ---- Watchdog ----
+// เฝ้าดู "การเชื่อมต่อ Discord" ไม่ใช่เว็บเซิร์ฟเวอร์ของตัวเอง
+// ของเดิมนับ heartbeat จาก HTTP request ที่เข้ามา ซึ่ง self-ping เติมให้เองทุก 7 นาที
+// ทำให้ lastAlive สดตลอดเวลา และ watchdog ไม่มีวันทำงาน แม้ Discord จะหลุดไปนานแค่ไหน
+let lastDiscordOk = Date.now();
 
 setInterval(() => {
-    if (Date.now() - lastAlive > BOT.WATCHDOG_TIMEOUT_MIN * 60 * 1000) {
-        logger.error('SYSTEM', 'Watchdog: บอทเงียบเกินไป กำลังรีสตาร์ท');
-        safeRestart('Watchdog Timeout');
+    if (client.isReady()) { lastDiscordOk = Date.now(); return; }
+    if (Date.now() - lastDiscordOk > BOT.WATCHDOG_TIMEOUT_MIN * 60 * 1000) {
+        logger.error('SYSTEM', `Watchdog: Discord หลุดเกิน ${BOT.WATCHDOG_TIMEOUT_MIN} นาที กำลังรีสตาร์ท`);
+        lastDiscordOk = Date.now(); // กันสั่งรีสตาร์ทซ้ำระหว่างรอ RESTART_DELAY_MS
+        safeRestart('Discord disconnected');
     }
 }, BOT.WATCHDOG_CHECK_INTERVAL_MS);
 
+// ---- HTTP server (health check + กันโฮสต์ฟรีหลับ) ----
 const server = http.createServer((req, res) => {
-    heartbeat();
     if (req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', uptime: process.uptime(), timestamp: Date.now() }));
+        const ready = client.isReady();
+        // ตอบ 503 เมื่อ Discord หลุด เพื่อให้ตัวมอนิเตอร์ภายนอก (เช่น UptimeRobot)
+        // แจ้งเตือนได้ทันที แทนที่จะเห็น 200 แล้วเข้าใจว่าบอทยังปกติดี
+        res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status: ready ? 'ok' : 'discord_disconnected',
+            discord: ready,
+            wsPing: client.ws.ping,
+            uptime: process.uptime(),
+            timestamp: Date.now(),
+        }));
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -47,25 +62,46 @@ const server = http.createServer((req, res) => {
 });
 server.listen(env.port, () => logger.info('SERVER', `HTTP เซิร์ฟเวอร์รันที่พอร์ต ${env.port}`));
 
+// ---- Self-ping ----
+// มีไว้กันโฮสต์ฟรีหลับอย่างเดียว ไม่ยุ่งกับ watchdog อีกต่อไป
 setInterval(() => {
     const lib = env.renderUrl.startsWith('https://') ? https : http;
-    lib.get(env.renderUrl, () => { heartbeat(); }).on('error', () => {});
+    const req = lib.get(env.renderUrl, (res) => { res.resume(); }); // resume() = ทิ้ง body ให้ socket ถูกคืน ไม่งั้นรั่วสะสม
+    req.setTimeout(10000, () => req.destroy());
+    req.on('error', () => { /* ปลุกไม่ติดก็ไม่เป็นไร รอบหน้าเอาใหม่ */ });
 }, BOT.SELF_PING_INTERVAL_MS);
 
 // Cleanup expired rate limiter entries
 setInterval(() => rateLimiter.cleanup(), CACHE.RATE_LIMITER_CLEANUP_INTERVAL_MS);
 
-function gracefulShutdown(signal: string): void {
+let shuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+    if (shuttingDown) return; // กันสัญญาณซ้ำ (SIGINT ตามด้วย SIGTERM) สั่งปิดซ้อนกัน
+    shuttingDown = true;
     logger.info('SHUTDOWN', `ได้รับสัญญาณ ${signal} — กำลังปิดระบบอย่างปลอดภัย...`);
     try {
         clearAllReplyTimeouts();
     } catch (e) { logger.warn('SHUTDOWN', String(e)); }
+
+    // ยอดที่เพิ่งนับได้จะถูกพักไว้ในหน่วยความจำราว 3 วินาทีก่อนเขียนลงชีต
+    // ถ้าดับตอนนั้นพอดี ยอดช่วงนั้นหายไปเลย — เขียนให้จบก่อนปิด
+    const pending = pendingCountOps();
+    if (pending > 0) {
+        logger.info('SHUTDOWN', `เขียนยอดที่ยังค้างอยู่ ${pending} รายการลงชีตก่อนปิด`);
+        await Promise.race([
+            flushPendingCounts().catch(silentCatch('SHUTDOWN')),
+            new Promise<void>(resolve => setTimeout(resolve, BOT.SHUTDOWN_FLUSH_TIMEOUT_MS)),
+        ]);
+    }
+
     client.destroy().catch(silentCatch('SHUTDOWN'));
-    setTimeout(() => process.exit(0), BOT.GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+    server.close();
+    setTimeout(() => { logger.close(); process.exit(0); }, BOT.GRACEFUL_SHUTDOWN_TIMEOUT_MS);
 }
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => { void gracefulShutdown('SIGINT'); });
+process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
 process.on('unhandledRejection', (reason: unknown) => {
     logger.error('SYSTEM', `ข้อผิดพลาดที่ไม่ถูกจัดการ: ${reason instanceof Error ? reason.message : String(reason)}`);
 });
@@ -80,8 +116,12 @@ const client = new Client({
 
 client.on('error', (err) => logger.error('CLIENT', `Discord error: ${err.message}`));
 client.on('warn', (info) => logger.warn('CLIENT', `Discord คำเตือน: ${info}`));
+// เห็นชัดใน log ว่าหลุด/ต่อใหม่ตอนไหน เวลาต้องไล่ปัญหาย้อนหลัง
+client.on(Events.ShardDisconnect, (_ev, id) => logger.warn('CLIENT', `Shard ${id} หลุดการเชื่อมต่อ`));
+client.on(Events.ShardReconnecting, (id) => logger.warn('CLIENT', `Shard ${id} กำลังเชื่อมต่อใหม่`));
+client.on(Events.ShardResume, (id) => logger.info('CLIENT', `Shard ${id} กลับมาเชื่อมต่อแล้ว`));
 client.once(Events.ClientReady, async () => {
-    heartbeat();
+    lastDiscordOk = Date.now();
     logger.info('CLIENT', `${client.user?.tag} ออนไลน์พร้อมทำงาน!`);
 
     // ✅ ลงทะเบียน Slash Commands ทั้งหมดด้วย Bulk Registration

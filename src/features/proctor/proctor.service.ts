@@ -4,8 +4,10 @@ import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import { sleep } from '../../services/utils';
+import { createRecentSet } from '../../services/recent-set';
 
-const processedMessages = new Set<string>();
+/** กัน process message ซ้ำ (message.id เดียว) ภายใน 60 วินาที */
+const recentMessages = createRecentSet(60000);
 
 async function sendWithQueue(ch: GuildTextBasedChannel, guild: Guild, embed: APIEmbed): Promise<boolean> {
     return locks.proctorSend.run(async () => {
@@ -64,9 +66,7 @@ async function sendProctorReport(ch: GuildTextBasedChannel, guild: Guild, embed:
 }
 
 export async function processProctor(message: Message): Promise<boolean> {
-    if (processedMessages.has(message.id)) return false;
-    processedMessages.add(message.id);
-    setTimeout(() => processedMessages.delete(message.id), 60000);
+    if (recentMessages.seenRecently(message.id)) return false;
 
     const guild = message.guild;
     if (!guild) return false;

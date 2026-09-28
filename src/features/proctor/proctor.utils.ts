@@ -1,13 +1,9 @@
 import type { APIEmbed, Message } from 'discord.js';
+import { embedHasText, hasWordUpper } from '../../services/embed-search';
 
 /** ตรวจว่า embed มีคำว่า Proctor หรือไม่ */
 function hasProctorInEmbed(embed: APIEmbed): boolean {
-    if (embed.title?.includes('📋 บันทึกการคุมสอบ Proctor')) return true;
-    if (embed.title?.toUpperCase().includes('PROCTOR')) return true;
-    if (embed.description?.toUpperCase().includes('PROCTOR')) return true;
-    if (embed.fields?.some((f) => f.name?.toUpperCase().includes('PROCTOR') || f.value?.toUpperCase().includes('PROCTOR'))) return true;
-    if (embed.footer?.text?.toUpperCase().includes('PROCTOR')) return true;
-    return false;
+    return embedHasText(embed, hasWordUpper('PROCTOR'));
 }
 
 /** ตรวจว่าข้อความหรือ embed ใดๆ มี Proctor หรือไม่ */

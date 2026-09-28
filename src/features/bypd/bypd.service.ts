@@ -4,10 +4,11 @@ import { configService } from '../../core/config.service';
 import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import { sleep } from '../../services/utils';
+import { createRecentSet } from '../../services/recent-set';
 import { hasBypdInEmbed, hasPdInEmbed, hasBypdOrPdInMessage, hasCarryInMessage, hasTake2InMessage } from './bypd.utils';
 
-/** กัน process message ซ้ำ (message.id เดียว) */
-const processedMessages = new Set<string>();
+/** กัน process message ซ้ำ (message.id เดียว) ภายใน 60 วินาที */
+const recentMessages = createRecentSet(60000);
 
 /** Tag cache: key = รหัส (เลข 2-3 หลัก), TTL 60 วิ */
 const tagCache = new Map<string, { tag: string; expires: number }>();
@@ -105,17 +106,33 @@ async function resolveTags(guild: Guild, content: string): Promise<string[]> {
     return tags;
 }
 
-function parseDetails(content: string) {
+/** Discord ปฏิเสธกล่องรายงานทั้งใบถ้ามีช่องไหนว่างเปล่า และจำกัดช่องละ 1024 ตัวอักษร */
+const EMBED_FIELD_MAX = 1024;
+
+/**
+ * ใส่ค่าลงช่อง — ถ้าค่าที่อ่านได้เป็นค่าว่าง ให้คง '-' ที่ตั้งไว้ตอนแรก
+ *
+ * ของเดิมทับค่าเริ่มต้นทุกครั้งแม้อ่านได้ค่าว่าง (เช่นบรรทัด "คดี :" ที่ไม่มีอะไรตามหลัง)
+ * พอมีช่องว่าง Discord ปฏิเสธทั้งกล่อง → รายงานใบนั้นไม่ถูกส่งเลย และไม่ติด ✅
+ * ทำให้กดส่งย้อนหลังกี่ครั้งก็พลาดซ้ำแบบเดิม คดีนั้นส่งไม่ได้ตลอดกาล
+ */
+function setField(target: Record<string, string>, key: string, value: string | undefined): void {
+    const v = (value ?? '').trim();
+    if (!v) return;
+    target[key] = v.length > EMBED_FIELD_MAX ? `${v.slice(0, EMBED_FIELD_MAX - 1)}…` : v;
+}
+
+export function parseDetails(content: string): Record<string, string> {
     const lines = content.split('\n');
     const r: Record<string, string> = { officer: '-', offender: '-', caseInfo: '-', jail: '-', fine: '-', time: '-' };
     for (const raw of lines) {
         const l = raw.replace(/\*\*/g, '').trim(); if (!l) continue;
-        if (l.includes('ผู้ต้องหา')) { const m = l.match(/ผู้ต้องหา\s+(.+?)(?:\s+ถูกจับโดย|$)/); if (m) r.offender = m[1].trim(); }
-        if (l.includes('เจ้าหน้าที่')) { const m = l.match(/เจ้าหน้าที่\s+(.+)/); if (m) r.officer = m[1].trim(); }
-        if (l.includes('คดี :')) r.caseInfo = l.split('คดี :')[1].trim();
-        if (l.includes('จำคุก :')) r.jail = l.split('จำคุก :')[1].trim();
-        if (l.includes('ค่าปรับ :')) r.fine = l.split('ค่าปรับ :')[1].trim();
-        if (l.includes('/') && l.includes(':')) { const t = l.match(/\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}:\d{2}:\d{2}/); if (t) r.time = t[0]; }
+        if (l.includes('ผู้ต้องหา')) { const m = l.match(/ผู้ต้องหา\s+(.+?)(?:\s+ถูกจับโดย|$)/); if (m) setField(r, 'offender', m[1]); }
+        if (l.includes('เจ้าหน้าที่')) { const m = l.match(/เจ้าหน้าที่\s+(.+)/); if (m) setField(r, 'officer', m[1]); }
+        if (l.includes('คดี :')) setField(r, 'caseInfo', l.split('คดี :')[1]);
+        if (l.includes('จำคุก :')) setField(r, 'jail', l.split('จำคุก :')[1]);
+        if (l.includes('ค่าปรับ :')) setField(r, 'fine', l.split('ค่าปรับ :')[1]);
+        if (l.includes('/') && l.includes(':')) { const t = l.match(/\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}:\d{2}:\d{2}/); if (t) setField(r, 'time', t[0]); }
     }
     return r;
 }
@@ -187,9 +204,7 @@ async function sendTake2Report(ch: GuildTextBasedChannel, guild: Guild, content:
 
 export async function processBypd(message: Message): Promise<boolean> {
     // ป้องกัน process message ID ซ้ำ
-    if (processedMessages.has(message.id)) return false;
-    processedMessages.add(message.id);
-    setTimeout(() => processedMessages.delete(message.id), 60000);
+    if (recentMessages.seenRecently(message.id)) return false;
 
     const guild = message.guild; if (!guild) return false;
 

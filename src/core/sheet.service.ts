@@ -1,23 +1,8 @@
-import { google, sheets_v4 } from 'googleapis';
-import fs from 'fs';
-import path from 'path';
+import { auth as googleAuth, sheets as sheetsApi, sheets_v4 } from '@googleapis/sheets';
 import { cache } from './cache';
 import { CACHE } from '../config';
 import { logger } from './logger';
-
-interface CredentialsFile {
-    client_email: string;
-    private_key: string;
-    type: string;
-    project_id: string;
-    private_key_id: string;
-    client_id: string;
-    auth_uri: string;
-    token_uri: string;
-    auth_provider_x509_cert_url: string;
-    client_x509_cert_url: string;
-    universe_domain: string;
-}
+import { loadCredentials, type CredentialsFile } from './credentials';
 
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
@@ -28,26 +13,35 @@ const INITIAL_RETRY_DELAY_MS = 1000;
  */
 export class SheetService {
     private auth: sheets_v4.Sheets | null = null;
-    private keys: CredentialsFile;
+    private keys: CredentialsFile | null = null;
     private lastRequestTime = 0;
     private readonly MIN_REQUEST_INTERVAL = 100; // 100ms between calls
 
-    constructor() {
-        const credPath = path.join(__dirname, '../../credentials.json');
-        const raw = fs.readFileSync(credPath, 'utf8');
-        this.keys = JSON.parse(raw) as CredentialsFile;
+    /**
+     * อ่าน credentials ตอนใช้งานจริงครั้งแรก ไม่ใช่ตอน import
+     *
+     * ของเดิมอ่านไฟล์ใน constructor ซึ่งทำงานทันทีที่โมดูลถูก import
+     * ผลคือ import ของ index.ts ถูก hoist ขึ้นไปทำงานก่อน validate() เสมอ
+     * ถ้าไม่มีกุญแจจะได้ ENOENT ดิบ ๆ แทนข้อความบอกสาเหตุที่เขียนไว้ใน validate()
+     * และไฟล์เทสที่ไม่เกี่ยวกับ Sheets เลยก็พังตามไปด้วย
+     */
+    private loadKeys(): CredentialsFile {
+        if (this.keys) return this.keys;
+        this.keys = loadCredentials();
+        return this.keys;
     }
 
     private getClient(): sheets_v4.Sheets {
         if (!this.auth) {
-            const auth = new google.auth.GoogleAuth({
+            const keys = this.loadKeys();
+            const auth = new googleAuth.GoogleAuth({
                 credentials: {
-                    client_email: this.keys.client_email,
-                    private_key: this.keys.private_key,
+                    client_email: keys.client_email,
+                    private_key: keys.private_key,
                 },
                 scopes: ['https://www.googleapis.com/auth/spreadsheets'],
             });
-            this.auth = google.sheets({ version: 'v4', auth });
+            this.auth = sheetsApi({ version: 'v4', auth });
         }
         return this.auth;
     }

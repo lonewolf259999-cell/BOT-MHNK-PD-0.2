@@ -35,6 +35,32 @@ async function fetchMsg(client: Client, channelId: string, messageId: string): P
 }
 
 /**
+ * แก้บรรทัดแท็กในข้อความ
+ *
+ * ปกติแก้ข้อความเดิมได้เลย แต่ถ้าข้อความไม่ใช่ของบอท (มาจากระบบภายนอก) จะแก้ไม่ได้
+ * ทางสำรองคือลบแล้วส่งใหม่ — ซึ่งเดิมส่งใหม่แค่บรรทัดแท็ก ทำให้
+ *   1) กล่องรายละเอียดคดี (เจ้าหน้าที่/ผู้ต้องหา/คดี/ค่าปรับ) หายทั้งกล่อง
+ *   2) เครื่องหมาย ✅ หายไป พอกดส่งย้อนหลังครั้งหน้า บอทจะส่งใบนั้นซ้ำ แล้วยอดบวกเกิน
+ * จึงต้องยกกล่องและเครื่องหมายเดิมไปด้วยทุกครั้ง
+ */
+async function editTagLine(msg: Message, content: string): Promise<void> {
+    try {
+        await msg.edit(content);
+        return;
+    } catch { /* แก้ไม่ได้ → ใช้ทางสำรอง */ }
+
+    if (!msg.channel.isTextBased()) return;
+    const embeds = msg.embeds.map(e => e.toJSON());
+    const emojis = msg.reactions.cache.map(r => r.emoji.name).filter((n): n is string => Boolean(n));
+
+    await msg.delete();
+    const sent = await (msg.channel as import('discord.js').GuildTextBasedChannel).send({ content, embeds });
+    for (const emoji of emojis) {
+        await sent.react(emoji).catch(silentCatch('EditTag'));
+    }
+}
+
+/**
  * Extract all mention IDs from a message content.
  */
 function extractMentionIds(content: string): string[] {
@@ -167,15 +193,7 @@ export function setupEditTagFeature(client: Client): void {
                         added++;
                     }
                 }
-                try {
-                    await msg.edit(c);
-                } catch {
-                    // Webhook message แก้ไม่ได้ → ลบแล้วส่งใหม่
-                    await msg.delete();
-                    if (msg.channel.isTextBased()) {
-                        await (msg.channel as import('discord.js').GuildTextBasedChannel).send(c);
-                    }
-                }
+                await editTagLine(msg, c);
                 await sel.editReply({ content: `✅ เพิ่ม ${added} คนสำเร็จ`, components: [] });
                 setTimeout(() => sel.deleteReply().catch(silentCatch('EditTag')), 3000);
                 return;
@@ -242,15 +260,7 @@ export function setupEditTagFeature(client: Client): void {
                     c = c.replace(new RegExp(`<@!?${id}>`, 'g'), '');
                 }
                 c = c.replace(/\s+/g, ' ').trim();
-                try {
-                    await msg.edit(c);
-                } catch {
-                    // Webhook message แก้ไม่ได้ → ลบแล้วส่งใหม่
-                    await msg.delete();
-                    if (msg.channel.isTextBased()) {
-                        await (msg.channel as import('discord.js').GuildTextBasedChannel).send(c);
-                    }
-                }
+                await editTagLine(msg, c);
                 await sel.editReply({ content: `✅ ลบ ${sel.values.length} คนสำเร็จ`, components: [] });
                 setTimeout(() => sel.deleteReply().catch(silentCatch('EditTag')), 3000);
                 return;
