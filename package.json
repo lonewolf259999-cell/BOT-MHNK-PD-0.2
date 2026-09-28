@@ -10,7 +10,8 @@
     "prebuild": "npm run lint && npm run typecheck",
     "lint": "eslint src/",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm test && npm run build"
   },
   "dependencies": {
     "@googleapis/sheets": "^18.0.1",
