@@ -8,6 +8,44 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
 
 /**
+ * ดึงสถานะ HTTP และรหัสข้อผิดพลาดระดับ socket ออกจาก error ที่ Google โยนมา
+ *
+ * error จาก googleapis ไม่มีรูปร่างตายตัว — บางทีมี response.status บางทีมีแค่ code
+ * แยกออกมาเป็นฟังก์ชันเดี่ยวเพื่อให้เทสได้โดยไม่ต้องต่อ Google จริง
+ */
+export function extractErrorInfo(error: unknown): { status?: number; code?: string } {
+    const errObj = error as Record<string, unknown>;
+    const status = typeof errObj?.response === 'object' && errObj.response
+        ? (errObj.response as Record<string, unknown>).status as number | undefined
+        : undefined;
+    const code = typeof errObj?.code === 'string' ? errObj.code : undefined;
+    return { status, code };
+}
+
+/**
+ * ข้อผิดพลาดนี้ควรลองใหม่ไหม
+ *
+ * ไม่มี status  = ต่อไม่ติดตั้งแต่แรก (เน็ตหลุด / DNS พัง) → ลองใหม่ได้
+ * 429           = เรายิงถี่เกินไป → รอแล้วลองใหม่
+ * 500 / 503     = ฝั่ง Google เอง → รอแล้วลองใหม่
+ * 400/403/404   = เราส่งผิดเอง (range ผิด, ไม่มีสิทธิ์, ไม่มีชีต) → ลองอีกกี่ครั้งก็ได้ผลเดิม
+ */
+export function isRetryableError(status?: number, code?: string): boolean {
+    return !status || status === 429 || status === 500 || status === 503
+        || code === 'ECONNRESET' || code === 'ETIMEDOUT';
+}
+
+/**
+ * หน่วงก่อนลองใหม่ — 1 วิ, 2 วิ, 4 วิ บวก jitter สุ่มไม่เกิน 1 วิ
+ *
+ * jitter กันกรณีหลายคำสั่งพลาดพร้อมกัน แล้วกลับมายิง Google พร้อมกันเป็นฝูงซ้ำอีก
+ * รับเป็นพารามิเตอร์ได้เพื่อให้เทสกำหนดค่าคงที่แทนการสุ่ม
+ */
+export function retryDelayMs(attempt: number, jitter: number = Math.random()): number {
+    return INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1) + jitter * 1000;
+}
+
+/**
  * Centralized Google Sheets service with retry, rate limiting, cache, and error handling.
  * Uses the same credentials and sheet IDs as the original bot.
  */
@@ -66,18 +104,15 @@ export class SheetService {
                 return await operation();
             } catch (error: unknown) {
                 lastError = error instanceof Error ? error : new Error(String(error));
-                const errObj = error as Record<string, unknown>;
-                const status = typeof errObj?.response === 'object' && errObj.response ? (errObj.response as Record<string, unknown>).status as number | undefined : undefined;
-                const code = typeof errObj?.code === 'string' ? errObj.code : undefined;
-                const isRetryable = !status || status === 429 || status === 500 || status === 503 || code === 'ECONNRESET' || code === 'ETIMEDOUT';
+                const { status, code } = extractErrorInfo(error);
 
-                if (!isRetryable) {
+                if (!isRetryableError(status, code)) {
                     logger.error('SHEET', `[${context}] Non-retryable error`, { status, message: lastError.message });
                     throw lastError;
                 }
 
                 if (attempt < MAX_RETRIES) {
-                    const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
+                    const delay = retryDelayMs(attempt);
                     logger.warn('SHEET', `[${context}] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms`, { status, message: lastError.message });
                     await new Promise(r => setTimeout(r, delay));
                 } else {

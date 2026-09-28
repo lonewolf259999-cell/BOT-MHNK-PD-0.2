@@ -4,29 +4,142 @@ import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import { truncateNickname, makeFullName } from '../../services/member.service';
 
+// ---------------------------------------------------------------------------
+// ส่วนตัดสินใจล้วน ๆ — ไม่แตะ Google, ไม่แตะ config
+// แยกออกมาเพื่อให้เทสได้ตรง ๆ ว่า "ข้อมูลแบบนี้ ต้องเลือกแถวไหน / เขียนช่องไหน"
+// ---------------------------------------------------------------------------
+
+export interface RegistrySlot {
+    /** เลขแถวแบบที่ Google ใช้ (เริ่มนับ 1) เอาไปต่อเป็น range ได้เลย */
+    row: number;
+    code: string;
+}
+
+/**
+ * หาแถวแรกที่ "มีรหัสประจำตัวแล้ว แต่ยังไม่มีชื่อ" = ที่ว่างสำหรับคนใหม่
+ *
+ * rows มาจาก range C:D → index 0 = คอลัมน์ C (รหัส), index 1 = คอลัมน์ D (ชื่อ)
+ * เริ่มที่ index 2 เพราะข้อมูลจริงเริ่มแถว 3 ของชีต (สองแถวแรกเป็นหัวตาราง)
+ */
+export function findEmptyRegistrySlot(rows: string[][]): RegistrySlot | null {
+    for (let i = 2; i < rows.length; i++) {
+        if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) {
+            return { row: i + 1, code: rows[i][0].trim() };
+        }
+    }
+    return null;
+}
+
+/**
+ * หาที่ว่างจากช่วงที่อ่านเพิ่มต่อท้าย เผื่อรหัสถูกเติมไว้เกินช่วงที่ C:D อ่านเจอ
+ *
+ * dyn มาจาก range C{n+1}:C{n+20} → มีแต่คอลัมน์ C ไม่มีคอลัมน์ D ให้เทียบ
+ * จึงถือว่าแถวไหนมีรหัสก็ว่างทั้งหมด
+ */
+export function findDynamicRegistrySlot(dyn: string[][], scannedRowCount: number): RegistrySlot | null {
+    for (let j = 0; j < dyn.length; j++) {
+        if (dyn[j][0]) {
+            return { row: scannedRowCount + j + 1, code: dyn[j][0].trim() };
+        }
+    }
+    return null;
+}
+
+/** วันที่แบบไม่เติมศูนย์นำหน้า เช่น 5/3/2026 — ตรงกับที่ชีตใช้อยู่เดิม */
+export function formatRegistrationDate(d: Date): string {
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+}
+
+export interface SheetRangeUpdate {
+    range: string;
+    values: string[][];
+}
+
+/**
+ * ช่องที่ต้องเขียนตอนลงทะเบียนสำเร็จ — B เบอร์, D ชื่อ, E mention, H วันที่
+ *
+ * mention นำหน้าด้วย ' เพื่อบังคับให้ Google เก็บเป็นข้อความ ไม่ตีความเป็นสูตร
+ * เขียนผิดช่องตรงนี้ = ทับข้อมูลกำลังพลคนอื่น จึงต้องมีเทสคุมไว้
+ */
+export function buildRegistrationUpdates(
+    sheetName: string,
+    row: number,
+    icPhone: string,
+    nickname: string,
+    userId: string,
+    date: string,
+): SheetRangeUpdate[] {
+    return [
+        { range: `${sheetName}!B${row}`, values: [[icPhone]] },
+        { range: `${sheetName}!D${row}:E${row}`, values: [[nickname, `'<@${userId}>`]] },
+        { range: `${sheetName}!H${row}`, values: [[date]] },
+    ];
+}
+
+/**
+ * คอลัมน์เดียวที่อ่านมา (เช่น E:E) มี Discord ID นี้อยู่ไหม
+ *
+ * ใช้ includes ไม่ใช่เทียบเท่ากันตรง ๆ เพราะคอลัมน์ E เก็บเป็น <@123456> ไม่ใช่เลขล้วน
+ */
+export function columnContainsUserId(rows: string[][], userId: string): boolean {
+    return rows.some(row => row[0] && row[0].toString().includes(userId));
+}
+
+/**
+ * แถวของ Discord ID นี้ในชีตทะเบียน
+ * rows มาจาก range C:E → index 0 = C (รหัส), 1 = D (ชื่อ), 2 = E (mention)
+ */
+export function findRegistryRowByDiscordId(
+    rows: string[][],
+    userId: string,
+): { row: number; codeNumber: string; currentName: string } | null {
+    for (let i = 2; i < rows.length; i++) {
+        if (rows[i]?.[2] && rows[i][2].trim().includes(userId)) {
+            return { row: i + 1, codeNumber: (rows[i][0] || '').trim(), currentName: (rows[i][1] || '').trim() };
+        }
+    }
+    return null;
+}
+
+export interface PendingEntry {
+    found: boolean;
+    status?: string;
+    icName?: string;
+    icPhone?: string;
+    ocAge?: string;
+}
+
+/**
+ * แถวของ Discord ID นี้ในชีตคิวรออนุมัติ
+ * rows มาจาก range A:H → B = Discord ID, D = ชื่อ IC, E = เบอร์, F = อายุ, H = สถานะ
+ * เริ่มที่ index 1 เพราะแถวแรกเป็นหัวตาราง
+ */
+export function findPendingEntry(rows: string[][], discordId: string): PendingEntry {
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if ((row[1] || '').trim() === discordId) {
+            return {
+                found: true,
+                status: (row[7] || '').trim(),
+                icName: (row[3] || '').trim(),
+                icPhone: (row[4] || '').trim(),
+                ocAge: (row[5] || '').trim(),
+            };
+        }
+    }
+    return { found: false };
+}
+
 /**
  * ตรวจสอบสถานะ Pending Sheet สำหรับ Discord ID ที่กำหนด
  */
-export async function checkPendingStatus(discordId: string): Promise<{ found: boolean; status?: string; icName?: string; icPhone?: string; ocAge?: string }> {
+export async function checkPendingStatus(discordId: string): Promise<PendingEntry> {
     const spreadsheetId = configService.getPendingSpreadsheetId();
     const sheetName = configService.getPendingSheetName();
     if (!spreadsheetId || !sheetName) return { found: false };
     try {
         const rows = await sheetService.getValues(spreadsheetId, `${sheetName}!A:H`, 0);
-        for (let i = 1; i < rows.length; i++) {
-            const row = rows[i];
-            const pendingId = (row[1] || '').trim();
-            if (pendingId === discordId) {
-                return {
-                    found: true,
-                    status: (row[7] || '').trim(),
-                    icName: (row[3] || '').trim(),
-                    icPhone: (row[4] || '').trim(),
-                    ocAge: (row[5] || '').trim(),
-                };
-            }
-        }
-        return { found: false };
+        return findPendingEntry(rows, discordId);
     } catch {
         return { found: false };
     }
@@ -49,10 +162,10 @@ export async function isAlreadyRegistered(userId: string, bypassCache = false): 
     if (!reg.spreadsheetId || !reg.sheetName) return false;
     const ttl = bypassCache ? 0 : 10000;
     const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!E:E`, ttl);
-    if (rows.some(row => row[0] && row[0].toString().includes(userId))) return true;
+    if (columnContainsUserId(rows, userId)) return true;
     if (reg.outSheetName) {
         const outRows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!E:E`, ttl);
-        return outRows.some(row => row[0] && row[0].toString().includes(userId));
+        return columnContainsUserId(outRows, userId);
     }
     return false;
 }
@@ -75,43 +188,27 @@ export async function registerMember(icName: string, userId: string, icPhone = '
             }
 
             const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:D`, 0);
-            let targetRow = -1, codeNumber = '';
+            let slot = findEmptyRegistrySlot(rows);
 
-            for (let i = 2; i < rows.length; i++) {
-                if (rows[i][0] && (!rows[i][1] || rows[i][1].trim() === '')) {
-                    targetRow = i + 1;
-                    codeNumber = rows[i][0].trim();
-                    break;
-                }
-            }
-
-            if (targetRow === -1) {
+            if (!slot) {
                 const dyn = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C${rows.length + 1}:C${rows.length + 20}`, 0);
-                for (let j = 0; j < dyn.length; j++) {
-                    if (dyn[j][0]) {
-                        targetRow = rows.length + j + 1;
-                        codeNumber = dyn[j][0].trim();
-                        break;
-                    }
-                }
+                slot = findDynamicRegistrySlot(dyn, rows.length);
             }
 
-            if (targetRow === -1) {
+            if (!slot) {
                 logger.warn('สมัคร', 'ไม่พบแถวว่างที่มีรหัส');
                 return null;
             }
 
-            const fullNickname = makeFullName(codeNumber, icName);
+            const fullNickname = makeFullName(slot.code, icName);
             const truncatedNick = truncateNickname(fullNickname);
-            const today = new Date();
-            const formattedDate = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+            const formattedDate = formatRegistrationDate(new Date());
 
-            await sheetService.batchUpdateValues(reg.spreadsheetId, [
-                { range: `${reg.sheetName}!B${targetRow}`, values: [[icPhone]] },
-                { range: `${reg.sheetName}!D${targetRow}:E${targetRow}`, values: [[truncatedNick, `'<@${userId}>`]] },
-                { range: `${reg.sheetName}!H${targetRow}`, values: [[formattedDate]] },
-            ]);
-            logger.info('สมัคร', `ลงทะเบียน ${fullNickname} เบอร์ ${icPhone} แถว ${targetRow}`);
+            await sheetService.batchUpdateValues(
+                reg.spreadsheetId,
+                buildRegistrationUpdates(reg.sheetName, slot.row, icPhone, truncatedNick, userId, formattedDate),
+            );
+            logger.info('สมัคร', `ลงทะเบียน ${fullNickname} เบอร์ ${icPhone} แถว ${slot.row}`);
             return { nickname: truncatedNick, wasTruncated: fullNickname.length > 32 };
 
         } catch (error) {
@@ -129,7 +226,7 @@ export async function checkInOutDc(userId: string): Promise<boolean> {
     if (!reg.spreadsheetId || !reg.outSheetName) return false;
     try {
         const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.outSheetName}!E:E`, 0);
-        return rows.some(row => row[0] && row[0].includes(userId));
+        return columnContainsUserId(rows, userId);
     } catch {
         return false;
     }
@@ -139,10 +236,7 @@ export async function findMemberByDiscordId(userId: string): Promise<{ row: numb
     const reg = configService.getRegistryConfig();
     if (!reg.spreadsheetId || !reg.sheetName) return null;
     const rows = await sheetService.getValues(reg.spreadsheetId, `${reg.sheetName}!C:E`, 0);
-    for (let i = 2; i < rows.length; i++) {
-        if (rows[i]?.[2] && rows[i][2].trim().includes(userId)) return { row: i + 1, codeNumber: (rows[i][0] || '').trim(), currentName: (rows[i][1] || '').trim() };
-    }
-    return null;
+    return findRegistryRowByDiscordId(rows, userId);
 }
 
 export async function updateMemberName(row: number, newFullName: string): Promise<void> {
