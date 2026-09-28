@@ -123,7 +123,11 @@ async function writeCountOps(ops: CountOp[], cfg: CountConfig): Promise<void> {
         const colIdx = chMap[channelId];
         if (colIdx === undefined) continue;
         for (const op of channelOps) {
-            const rowIdx = ensureUserRow(rows, op.tag);
+            // หักยอด: ต้องมีแถวอยู่แล้วเท่านั้น ไม่มีแถว = ไม่มีอะไรให้หัก
+            // ถ้าปล่อยให้สร้างแถวใหม่เพื่อจะหัก จะได้แถวขยะเปล่า ๆ เพิ่มมาในชีต
+            // (ยิ่งตอนหักคนที่ออกจากเซิร์ฟไปแล้ว เราจะไม่มีชื่อเขา แถวที่สร้างจะไม่มีชื่อด้วย)
+            const rowIdx = op.isDelete ? findUserRow(rows, op.tag) : ensureUserRow(rows, op.tag);
+            if (rowIdx === -1) continue;
             const currentVal = parseInt(rows[rowIdx][colIdx] || '0') || 0;
             const newVal = currentVal + (op.isDelete ? -1 : 1);
             rows[rowIdx][colIdx] = newVal > 0 ? newVal.toString() : '';
@@ -241,18 +245,23 @@ function findRowByName(rows: string[][], tag: TagInfo): number {
  * 
  * Sheet format: [A=displayName, B=UserID, C=Take2, D=คดีปกติ, E=รถยอด, F=คุมสอบ, G=อุ้มเอ๋อ]
  */
-export function ensureUserRow(rows: string[][], tag: TagInfo): number {
+export function findUserRow(rows: string[][], tag: TagInfo): number {
     // Priority 1: Exact User ID match in Column B
-    let idx = findRowById(rows, tag.id);
-    if (idx !== -1) return idx;
+    const byId = findRowById(rows, tag.id);
+    if (byId !== -1) return byId;
 
     // Priority 2: Backward-compatible name match in Column A
-    idx = findRowByName(rows, tag);
-    if (idx !== -1) {
+    const byName = findRowByName(rows, tag);
+    if (byName !== -1) {
         // Migrate: set User ID in Column B for future exact lookups
-        rows[idx][1] = tag.id;
-        return idx;
+        rows[byName][1] = tag.id;
     }
+    return byName;
+}
+
+export function ensureUserRow(rows: string[][], tag: TagInfo): number {
+    const found = findUserRow(rows, tag);
+    if (found !== -1) return found;
 
     // Priority 3: Create new row [displayName, UserID, '', '', '', '', '']
     rows.push([tag.nickname || tag.username, tag.id, '', '', '', '', '']);

@@ -98,6 +98,31 @@ describe('คิวนับเคส — เขียนชีตไม่ส�
     });
 });
 
+describe('หักยอด — ต้องไม่สร้างแถวขยะ', () => {
+    it('หักยอดคนที่ไม่มีแถวในชีต → ต้องข้ามไปเฉย ๆ ไม่สร้างแถวใหม่', async () => {
+        // เกิดตอนหักยอดคนที่ออกจากเซิร์ฟไปแล้ว (เราจำไว้แค่รหัส ไม่มีชื่อ)
+        // หรือแถวถูกลบออกจากชีตด้วยมือไปก่อน
+        await processCountBatch([{ id: '999', nickname: '', username: '' }], 'ch1', true);
+        await flushPendingCounts();
+
+        // ไม่มีแถวให้หัก = ไม่ต้องเขียนอะไรลงชีตเลย
+        expect(batchUpdate).not.toHaveBeenCalled();
+    });
+
+    it('หักยอดคนที่มีแถวอยู่ → หักได้ปกติ', async () => {
+        getValues.mockResolvedValue([
+            [], [], [...HEADER],
+            ['เจ้าหน้าที่111', '111', '5', '', '', '', ''],
+        ]);
+        await processCountBatch([{ id: '111', nickname: '', username: '' }], 'ch1', true);
+        await flushPendingCounts();
+
+        const updates = batchUpdate.mock.calls[0][1];
+        const written = updates.flatMap((u: { values: string[][] }) => u.values);
+        expect(written.some((row: string[]) => row[1] === '111' && row[2] === '4')).toBe(true);
+    });
+});
+
 describe('flushDelayFor — ถอยห่างขึ้นเรื่อย ๆ เมื่อพลาดติดกัน', () => {
     it('ยิ่งพลาดยิ่งรอนานขึ้น', () => {
         expect(flushDelayFor(0)).toBe(3000);
