@@ -191,17 +191,100 @@ export class SheetService {
 
     /**
      * Append values to a sheet.
+     *
+     * valueInputOption:
+     *   USER_ENTERED (ค่าเริ่มต้น) = ให้ Google ตีความเหมือนคนพิมพ์เอง เลขเป็นเลข วันที่เป็นวันที่
+     *   RAW                        = เก็บเป็นข้อความเป๊ะ ๆ ตามที่ส่งไป
+     *
+     * ต้องมีตัวเลือกนี้เพราะ USER_ENTERED จะแปลงข้อความเวลาอย่าง "2026-10-02 03:47:11"
+     * เป็นค่าวันที่ของ Google แล้วตอนอ่านกลับจะได้ "รูปแบบที่มันจัดแสดง" (เช่น 3:47:11)
+     * ซึ่งไม่ตรงกับที่เขียนไป ทำให้โค้ดที่ต้องอ่านเวลากลับมาเทียบ (ลบ log เก่า) พังเงียบ ๆ
      */
-    async appendValues(spreadsheetId: string, range: string, values: string[][]): Promise<void> {
+    async appendValues(
+        spreadsheetId: string,
+        range: string,
+        values: string[][],
+        valueInputOption: 'USER_ENTERED' | 'RAW' = 'USER_ENTERED',
+    ): Promise<void> {
         const client = this.getClient();
         await this.executeWithRetry(
             () => client.spreadsheets.values.append({
                 spreadsheetId,
                 range,
-                valueInputOption: 'USER_ENTERED',
+                valueInputOption,
                 requestBody: { values },
             }),
             `appendValues(${spreadsheetId}, ${range})`
+        );
+        this.invalidateCache(spreadsheetId);
+    }
+
+    /**
+     * หมายเลขภายในของแท็บ (ใช้กับคำสั่งที่แก้โครงชีต เช่นลบแถว)
+     * ไม่ใช่ชื่อแท็บ — Google ต้องการตัวเลขนี้ ไม่ใช่ชื่อ
+     */
+    async getSheetTabId(spreadsheetId: string, title: string): Promise<number | null> {
+        const client = this.getClient();
+        const res = await this.executeWithRetry(
+            () => client.spreadsheets.get({ spreadsheetId }),
+            `getSheetTabId(${spreadsheetId}, ${title})`
+        );
+        for (const s of res.data.sheets ?? []) {
+            if (s.properties?.title === title) return s.properties.sheetId ?? null;
+        }
+        return null;
+    }
+
+    /**
+     * สร้างแท็บถ้ายังไม่มี แล้วใส่หัวตารางให้
+     *
+     * มีไว้ให้ระบบ log ซ่อมตัวเองได้ ถ้าใครเผลอลบแท็บทิ้ง — ไม่ใช่ให้ไปสร้างมือใหม่ทุกครั้ง
+     * คืนค่า true เมื่อเพิ่งสร้างใหม่ เพื่อให้ผู้เรียก log บอกไว้ได้ว่าเกิดอะไรขึ้น
+     */
+    async ensureSheetTab(spreadsheetId: string, title: string, header: string[]): Promise<boolean> {
+        const existing = await this.getSheetTabId(spreadsheetId, title);
+        if (existing !== null) return false;
+
+        const client = this.getClient();
+        await this.executeWithRetry(
+            () => client.spreadsheets.batchUpdate({
+                spreadsheetId,
+                requestBody: {
+                    requests: [{
+                        addSheet: {
+                            properties: {
+                                title,
+                                gridProperties: { rowCount: 1000, columnCount: header.length, frozenRowCount: 1 },
+                            },
+                        },
+                    }],
+                },
+            }),
+            `ensureSheetTab(${spreadsheetId}, ${title})`
+        );
+        await this.updateValues(spreadsheetId, `${title}!A1`, [header]);
+        return true;
+    }
+
+    /**
+     * ลบแถวตามช่วง (นับจาก 0 และไม่รวมแถวปลาย — ตามที่ Google กำหนด)
+     * ใช้ลบ log เก่า: ลบจากบนสุดลงมา เพราะเราต่อท้ายเสมอ แถวบนจึงเก่าสุด
+     */
+    async deleteRowRange(spreadsheetId: string, sheetTabId: number, startIndex: number, endIndex: number): Promise<void> {
+        if (endIndex <= startIndex) return;
+        const client = this.getClient();
+        await this.executeWithRetry(
+            () => client.spreadsheets.batchUpdate({
+                spreadsheetId,
+                requestBody: {
+                    requests: [{
+                        deleteDimension: {
+                            range: { sheetId: sheetTabId, dimension: 'ROWS', startIndex, endIndex },
+                        },
+                    }],
+                },
+            }),
+            `deleteRowRange(${spreadsheetId}, ${sheetTabId}, ${startIndex}-${endIndex})`
         );
         this.invalidateCache(spreadsheetId);
     }

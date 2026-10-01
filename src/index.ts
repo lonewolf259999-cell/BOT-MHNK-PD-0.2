@@ -1,10 +1,12 @@
 import { Client, GatewayIntentBits, Partials, Events, SlashCommandBuilder, ContextMenuCommandBuilder, ApplicationCommandType, PermissionFlagsBits, type RESTPostAPIApplicationCommandsJSONBody } from 'discord.js';
 import http from 'http';
 import https from 'https';
+import crypto from 'crypto';
 import { env, BOT, CACHE, validate } from './config';
 import { configService } from './core/config.service';
 import { rateLimiter } from './core/ratelimiter';
-import { logger } from './core/logger';
+import { logger, recent, bufferStats, type LogLevel } from './core/logger';
+import { startLogStore, flushLogSheet, pendingLogRows } from './core/logstore.service';
 import { clearAllReplyTimeouts, silentCatch } from './services/utils';
 import { flushPendingCounts, pendingCountOps } from './features/count/count.service';
 
@@ -41,8 +43,77 @@ setInterval(() => {
     }
 }, BOT.WATCHDOG_CHECK_INTERVAL_MS);
 
+/**
+ * เทียบรหัสผ่านแบบไม่หลุดเวลา
+ *
+ * เทียบด้วย === จะคืนผลเร็วกว่าเมื่อตัวอักษรแรกไม่ตรง ซึ่งพอวัดเวลาหลาย ๆ ครั้ง
+ * จะเดารหัสทีละตัวได้ — ช่องนี้เปิดรับจากอินเทอร์เน็ต จึงไม่ควรเปิดช่องนั้นไว้
+ */
+function tokenMatches(given: string): boolean {
+    const want = env.logApiToken;
+    if (!want || !given) return false;
+    const a = Buffer.from(given);
+    const b = Buffer.from(want);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+}
+
+const LEVELS: LogLevel[] = ['INFO', 'WARN', 'ERROR', 'DEBUG'];
+
+/** อ่านตัวกรองจาก query string ของ /logs */
+function parseLogQuery(url: URL): Parameters<typeof recent>[0] {
+    const levelsRaw = (url.searchParams.get('level') || '').toUpperCase();
+    const levels = LEVELS.filter(l => levelsRaw.split(',').map(s => s.trim()).includes(l));
+    const limit = Number(url.searchParams.get('limit'));
+    const since = Number(url.searchParams.get('since'));
+    return {
+        levels: levels.length > 0 ? levels : undefined,
+        context: url.searchParams.get('context') || undefined,
+        search: url.searchParams.get('q') || undefined,
+        since: Number.isFinite(since) && since > 0 ? since : undefined,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+    };
+}
+
+/**
+ * ส่ง log ที่เก็บไว้ในหน่วยความจำให้หน้าเว็บ
+ *
+ * อ่านจากหน่วยความจำ ไม่ใช่จากไฟล์ เพราะบนโฮสต์ปิดการเขียนไฟล์ไว้ (LOG_TO_FILE=false)
+ * ข้อความถูกกรองความลับออกตั้งแต่ตอนเก็บแล้ว (ดู redact ใน core/logger)
+ */
+function handleLogs(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const url = new URL(req.url || '/', 'http://localhost');
+    const given = (req.headers['x-log-token'] as string | undefined) || url.searchParams.get('token') || '';
+
+    if (!env.logApiToken) {
+        res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'ยังไม่ได้ตั้ง LOG_API_TOKEN — ช่องนี้ถูกปิดไว้' }));
+        return;
+    }
+    if (!tokenMatches(given)) {
+        logger.warn('LOGAPI', 'มีการขอ log ด้วยรหัสผ่านที่ไม่ถูกต้อง');
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'รหัสผ่านไม่ถูกต้อง' }));
+        return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+        ok: true,
+        bot: { ready: client.isReady(), uptime: process.uptime(), wsPing: client.ws.ping },
+        buffer: bufferStats(),
+        pendingSheetRows: pendingLogRows(),
+        pendingCountOps: pendingCountOps(),
+        entries: recent(parseLogQuery(url)),
+    }));
+}
+
 // ---- HTTP server (health check + กันโฮสต์ฟรีหลับ) ----
 const server = http.createServer((req, res) => {
+    if (req.url?.startsWith('/logs')) {
+        handleLogs(req, res);
+        return;
+    }
     if (req.url === '/health') {
         const ready = client.isReady();
         // ตอบ 503 เมื่อ Discord หลุด เพื่อให้ตัวมอนิเตอร์ภายนอก (เช่น UptimeRobot)
@@ -91,6 +162,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
         logger.info('SHUTDOWN', `เขียนยอดที่ยังค้างอยู่ ${pending} รายการลงชีตก่อนปิด`);
         await Promise.race([
             flushPendingCounts().catch(silentCatch('SHUTDOWN')),
+            new Promise<void>(resolve => setTimeout(resolve, BOT.SHUTDOWN_FLUSH_TIMEOUT_MS)),
+        ]);
+    }
+
+    // log ที่ยังค้างในคิวก็ต้องลงชีตให้ทัน ไม่งั้นเหตุการณ์ช่วงท้ายหายไปพร้อม process
+    const pendingLogs = pendingLogRows();
+    if (pendingLogs > 0) {
+        logger.info('SHUTDOWN', `เขียน log ที่ยังค้างอยู่ ${pendingLogs} แถวลงชีตก่อนปิด`);
+        await Promise.race([
+            flushLogSheet().catch(silentCatch('SHUTDOWN')),
             new Promise<void>(resolve => setTimeout(resolve, BOT.SHUTDOWN_FLUSH_TIMEOUT_MS)),
         ]);
     }
@@ -174,6 +255,9 @@ client.once(Events.ClientReady, async () => {
 });
 
 async function start(): Promise<void> {
+    // เริ่มเก็บ log ก่อนทำอย่างอื่น เพื่อให้ปัญหาตอนสตาร์ทถูกบันทึกไว้ด้วย
+    startLogStore();
+
     try {
         await configService.load();
     } catch {
