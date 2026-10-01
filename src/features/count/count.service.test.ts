@@ -151,3 +151,36 @@ describe('buildCountUpdates', () => {
         expect(updates.map(u => u.range)).toEqual(['ยอดเคส!A3:G3', 'ยอดเคส!A4:G4']);
     });
 });
+
+describe('นับได้แม้ไม่รู้ชื่อคน (คนที่ออกจากเซิร์ฟไปแล้ว)', () => {
+    it('มีแถวอยู่แล้วและรหัสตรง → เจอแถวเดิม ไม่ต้องรู้ชื่อเลย', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        const tag: TagInfo = { id: '222', nickname: '', username: '' };
+        expect(ensureUserRow(rows, tag)).toBe(4);
+        expect(rows.length).toBe(5); // ห้ามสร้างแถวเกินมา
+    });
+
+    it('ไม่มีแถวและไม่รู้ชื่อ → สร้างแถวใหม่โดยใส่เลขไอดีไว้ในช่องชื่อ ห้ามทิ้งยอด', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        const tag: TagInfo = { id: '999', nickname: '', username: '' };
+        const idx = ensureUserRow(rows, tag);
+        expect(rows[idx][0]).toBe('999'); // ช่องชื่อใส่เลขไอดีไว้ก่อน ไม่ปล่อยว่าง
+        expect(rows[idx][1]).toBe('999');
+    });
+
+    it('ชื่อเล่นว่างแต่มี username ที่ไม่ตรงใคร → ห้ามไปโดนแถวแรกมั่ว', () => {
+        // includes('') เป็นจริงกับทุกชื่อ ถ้ากันแค่ตอนว่างทั้งคู่ ยอดจะไปบวกผิดคน
+        const rows = structuredClone(existingRows) as string[][];
+        const before = rows.length;
+        const tag: TagInfo = { id: '999', nickname: '', username: 'zzz_ไม่ตรงใครเลย' };
+        expect(ensureUserRow(rows, tag)).toBe(before);
+        expect(rows[3][0]).toBe('John');
+        expect(rows[4][0]).toBe('Alice');
+    });
+
+    it('ชื่อเล่นว่างแต่ username ตรงกับชื่อในชีต → ยังหาแถวเดิมเจอตามเดิม', () => {
+        const rows = structuredClone(existingRows) as string[][];
+        const tag: TagInfo = { id: '999', nickname: '', username: 'alice' };
+        expect(ensureUserRow(rows, tag)).toBe(4);
+    });
+});

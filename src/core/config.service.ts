@@ -1,6 +1,17 @@
 import { sheetService } from './sheet.service';
-import { SHEETS } from '../config';
+import { SHEETS, COUNT } from '../config';
 import { logger } from './logger';
+
+/**
+ * อ่านจำนวนชั่วโมงจากชีต — ค่าว่างหรือพิมพ์ผิดให้ใช้ค่า default
+ * ห้ามปล่อยให้ค่าเพี้ยนจากชีตทำให้ตรรกะเวลาพัง
+ */
+export function parseHours(raw: string | undefined, fallback: number): number {
+    const t = (raw ?? '').trim();
+    if (!t) return fallback;
+    const n = Number(t);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
 
 export class ConfigService {
     private data: Record<string, string> = {};
@@ -19,6 +30,7 @@ export class ConfigService {
     private logTake2ChannelId = '';
     private proctorSendChannelId = '';
     private editTagMode = '';
+    private editAlertHours = COUNT.EDIT_ALERT_HOURS_DEFAULT;
     async load(bypassCache = false): Promise<void> {
         try {
             const ttl = bypassCache ? 0 : 30000;
@@ -40,6 +52,7 @@ export class ConfigService {
             this.logTake2ChannelId = this.data.LOGTAKE2_CHANNEL_ID || '';
             this.proctorSendChannelId = this.data.PROCTOR_SEND_CHANNEL_ID || '';
             this.editTagMode = this.data.EDIT_TAG_MODE || '';
+            this.editAlertHours = parseHours(this.data.EDIT_ALERT_HOURS, COUNT.EDIT_ALERT_HOURS_DEFAULT);
             this.loaded = true;
             logger.info('CONFIG', 'โหลด Config จาก Google Sheet สำเร็จ');
         } catch (error) {
@@ -65,6 +78,8 @@ export class ConfigService {
     getPendingSpreadsheetId(): string { return this.pendingSpreadsheetId; }
     getPendingSheetName(): string { return this.pendingSheetName; }
     getEditTagMode(): string { return this.editTagMode; }
+    /** กี่ชั่วโมงที่ถือว่า "ยังอยู่ในกรอบที่คนแก้กันปกติ" — เกินกว่านี้แค่แจ้งเตือน ไม่ได้ห้าม */
+    getEditAlertHours(): number { return this.editAlertHours; }
     async writeConfigKeys(updates: [string, string][]): Promise<void> {
         const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 0);
         const map = new Map<string, string>();

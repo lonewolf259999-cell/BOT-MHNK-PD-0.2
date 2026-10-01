@@ -228,7 +228,10 @@ function findRowByName(rows: string[][], tag: TagInfo): number {
         if (nameCell) {
             const nameLower = normalizeName(nameCell);
             // Match by display name OR by username in Column B
-            if (nameLower.includes(n) || nameLower.includes(u) || normalizeName(idCell || '') === u) {
+            // เทียบเฉพาะค่าที่มีจริง — includes('') เป็นจริงกับทุกชื่อ
+            // ตอนนี้ชื่อเล่นว่างได้บ่อยขึ้น (แท็กคนที่หาตัวไม่เจอ) จึงต้องกันทีละค่า
+            // ไม่ใช่กันแค่ตอนที่ว่างทั้งคู่ ไม่งั้นยอดจะไปโดนแถวแรกที่มีชื่อแบบมั่ว ๆ
+            if ((n && nameLower.includes(n)) || (u && nameLower.includes(u)) || (u && normalizeName(idCell || '') === u)) {
                 return i;
             }
         }
@@ -264,7 +267,9 @@ export function ensureUserRow(rows: string[][], tag: TagInfo): number {
     if (found !== -1) return found;
 
     // Priority 3: Create new row [displayName, UserID, '', '', '', '', '']
-    rows.push([tag.nickname || tag.username, tag.id, '', '', '', '', '']);
+    // หาชื่อไม่ได้ (เช่นคนออกจากเซิร์ฟไปแล้ว) ก็ยังต้องนับยอดให้ — ใส่เลขไอดีไว้ในช่องชื่อก่อน
+    // ดีกว่าทิ้งยอดทิ้ง และคนดูชีตเอาเลขไปหาตัวคนแล้วเติมชื่อเองได้ทีหลัง
+    rows.push([tag.nickname || tag.username || tag.id, tag.id, '', '', '', '', '']);
     return rows.length - 1;
 }
 
