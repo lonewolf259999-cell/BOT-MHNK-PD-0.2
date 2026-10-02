@@ -3,7 +3,7 @@
  *
  * แบ่งหน้าที่กับ logger ชัดเจน:
  *   - logger  เก็บ "ทุกบรรทัด" ไว้ในหน่วยความจำ 24 ชม. (ฟรี ไม่กินโควต้า)
- *   - ที่นี่   เก็บ "เฉพาะที่สำคัญ" ลงชีต 30 วัน (ทนบอทรีสตาร์ท)
+ *   - ที่นี่   เก็บ "เฉพาะที่สำคัญ" ลงชีตแค่แถวล่าสุดตาม LOG.SHEET_MAX_ROWS (ทนบอทรีสตาร์ท)
  *
  * ทำไมต้องรวบเป็นชุด:
  * บอทกับเว็บใช้บัญชี Google ตัวเดียวกัน โควต้าเขียนจึงแชร์กัน (ราว 60 ครั้ง/นาที)
@@ -12,7 +12,6 @@
  */
 
 import { sheetService } from './sheet.service';
-import { configService } from './config.service';
 import { SHEETS, LOG } from '../config';
 import { logger, onEntry, type LogEntry } from './logger';
 
@@ -77,36 +76,18 @@ export function formatSheetTime(at: number): string {
 }
 
 /**
- * อ่านเวลาที่เราเขียนลงชีตกลับมา — คืน null ถ้าอ่านไม่ออก (เช่นมีคนพิมพ์มือ)
+ * เกินเพดานกี่แถว — เอาไปลบจากแถวบน (เก่าสุด)
  *
- * ยอมรับแบบไม่เติมศูนย์หน้าด้วย (เช่น "2026-10-02 3:47:11")
- * เพราะถ้าเซลล์ไหนเคยถูก Google ตีความเป็นค่าวันที่ มันจะคืนรูปแบบที่มันจัดแสดงกลับมา
- * ตัวอ่านต้องทนไว้ ไม่งั้นการลบ log เก่าจะหยุดที่แถวนั้นแล้วไม่ลบอะไรเลยตลอดกาล
- */
-export function parseSheetTime(text: string | undefined): number | null {
-    const m = (text ?? '').trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2}):(\d{1,2})$/);
-    if (!m) return null;
-    const p2 = (x: string) => x.padStart(2, '0');
-    // ค่าในชีตเป็นเวลาไทย ต้องบอกโซนให้ชัด ไม่ปล่อยให้ตีความตามโซนของเครื่องโฮสต์
-    const ms = Date.parse(`${m[1]}-${p2(m[2])}-${p2(m[3])}T${p2(m[4])}:${p2(m[5])}:${p2(m[6])}+07:00`);
-    return Number.isNaN(ms) ? null : ms;
-}
-
-/**
- * นับว่าจากบนสุดมีแถวข้อมูลเก่ากว่าเวลาตัดกี่แถว (เพื่อเอาไปลบ)
- *
- * เราต่อท้ายเสมอ แถวบนจึงเก่าสุด → หยุดนับทันทีที่เจอแถวที่ยังไม่เก่า
+ * เราต่อท้ายเสมอ แถวบนจึงเก่าสุด ตัดหัวทิ้งจึงเหลือของใหม่สุดตามเพดานพอดี
  * rows มาจากคอลัมน์ A ทั้งแท็บ: index 0 = หัวตาราง, ข้อมูลเริ่ม index 1
- * อ่านเวลาไม่ออกก็ให้หยุด ปลอดภัยกว่าการเดาแล้วลบของที่ยังต้องใช้
+ *
+ * ไม่แตะเวลาในเซลล์เลยโดยเจตนา — นับจำนวนแถวตรง ๆ จึงไม่มีทางพังเพราะ
+ * Google เปลี่ยนรูปแบบการแสดงค่าในเซลล์ ซึ่งของเดิม (ตัดตามวัน) พังได้เงียบ ๆ
  */
-export function countExpiredRows(rows: string[][], cutoff: number): number {
-    let n = 0;
-    for (let i = 1; i < rows.length; i++) {
-        const at = parseSheetTime(rows[i]?.[0]);
-        if (at === null || at >= cutoff) break;
-        n = i;
-    }
-    return n;
+export function countRowsToDrop(rows: string[][], maxRows: number): number {
+    if (maxRows <= 0) return 0;
+    const data = Math.max(rows.length - 1, 0);   // ไม่นับหัวตาราง
+    return data > maxRows ? data - maxRows : 0;
 }
 
 function toRow(entry: LogEntry): string[] {
@@ -182,30 +163,34 @@ export async function flushLogSheet(): Promise<void> {
     }
 }
 
-/** ลบ log เก่าในชีตตามจำนวนวันที่ตั้งไว้ (0 = ไม่ลบ) */
-export async function cleanupLogSheet(): Promise<void> {
-    const days = configService.getLogRetentionDays();
-    if (days <= 0) return;
-
+/** ตัดแท็บหนึ่งให้เหลือแถวล่าสุดตามเพดาน — ไม่สร้างแท็บให้ ถ้ายังไม่มีก็ข้าม */
+async function trimLogTab(tab: string): Promise<void> {
     try {
-        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-        const rows = await sheetService.getValues(
-            SHEETS.CONFIG_SHEET_ID,
-            `${SHEETS.LOG_SHEET_NAME}!A:A`,
-            0,
-        );
-        const expired = countExpiredRows(rows, cutoff);
-        if (expired < 1) return;
+        const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${tab}!A:A`, 0);
+        const drop = countRowsToDrop(rows, LOG.SHEET_MAX_ROWS);
+        if (drop < 1) return;
 
-        const tabId = await sheetService.getSheetTabId(SHEETS.CONFIG_SHEET_ID, SHEETS.LOG_SHEET_NAME);
+        const tabId = await sheetService.getSheetTabId(SHEETS.CONFIG_SHEET_ID, tab);
         if (tabId === null) return;
 
         // index 1 = แถวที่ 2 ของชีต (ข้ามหัวตาราง) · ปลายช่วงไม่ถูกรวม
-        await sheetService.deleteRowRange(SHEETS.CONFIG_SHEET_ID, tabId, 1, expired + 1);
-        logger.info(NEVER_PERSIST, `ลบ log เก่าในชีต ${expired} แถว (เก่ากว่า ${days} วัน)`);
+        await sheetService.deleteRowRange(SHEETS.CONFIG_SHEET_ID, tabId, 1, drop + 1);
+        logger.info(NEVER_PERSIST, `ตัด log แท็บ ${tab} ทิ้ง ${drop} แถว (เหลือ ${LOG.SHEET_MAX_ROWS} แถวล่าสุด)`);
     } catch (err) {
-        logger.warn(NEVER_PERSIST, `ลบ log เก่าไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn(NEVER_PERSIST, `ตัด log แท็บ ${tab} ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
     }
+}
+
+/**
+ * ตัด log ในชีตให้เหลือแค่แถวล่าสุดตามเพดาน
+ *
+ * ดูแลแท็บของเว็บให้ด้วย เพราะเว็บรันบน Vercel ซึ่งไม่มีตัวตั้งเวลาของตัวเอง
+ * ของเดิมแท็บเว็บถูกตัดเฉพาะตอนมีคนเปิดหน้า /police/logs — ไม่มีคนเปิดก็ไม่ถูกตัด
+ * ทั้งสองแท็บอยู่ไฟล์เดียวกันและบอทมีสิทธิ์เขียนอยู่แล้ว จึงทำให้ตรงนี้ทีเดียวจบ
+ */
+export async function cleanupLogSheet(): Promise<void> {
+    await trimLogTab(SHEETS.LOG_SHEET_NAME);
+    await trimLogTab(SHEETS.WEB_LOG_SHEET_NAME);
 }
 
 let started = false;
@@ -220,5 +205,5 @@ export function startLogStore(): void {
     setInterval(() => { void flushLogSheet(); }, LOG.SHEET_FLUSH_INTERVAL_MS);
     setInterval(() => { void cleanupLogSheet(); }, LOG.SHEET_CLEANUP_INTERVAL_MS);
 
-    logger.info(NEVER_PERSIST, `เริ่มเก็บ log ลงแท็บ ${SHEETS.LOG_SHEET_NAME} (รวบส่งทุก ${LOG.SHEET_FLUSH_INTERVAL_MS / 1000} วิ)`);
+    logger.info(NEVER_PERSIST, `เริ่มเก็บ log ลงแท็บ ${SHEETS.LOG_SHEET_NAME} (รวบส่งทุก ${LOG.SHEET_FLUSH_INTERVAL_MS / 1000} วิ · เก็บ ${LOG.SHEET_MAX_ROWS} แถวล่าสุด)`);
 }

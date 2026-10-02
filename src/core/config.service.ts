@@ -1,5 +1,5 @@
 import { sheetService } from './sheet.service';
-import { SHEETS, COUNT, LOG } from '../config';
+import { SHEETS, COUNT } from '../config';
 import { logger } from './logger';
 
 /**
@@ -31,7 +31,6 @@ export class ConfigService {
     private proctorSendChannelId = '';
     private editTagMode = '';
     private editAlertHours = COUNT.EDIT_ALERT_HOURS_DEFAULT;
-    private logRetentionDays = LOG.RETENTION_DAYS_DEFAULT;
     async load(bypassCache = false): Promise<void> {
         try {
             const ttl = bypassCache ? 0 : 30000;
@@ -54,7 +53,6 @@ export class ConfigService {
             this.proctorSendChannelId = this.data.PROCTOR_SEND_CHANNEL_ID || '';
             this.editTagMode = this.data.EDIT_TAG_MODE || '';
             this.editAlertHours = parseHours(this.data.EDIT_ALERT_HOURS, COUNT.EDIT_ALERT_HOURS_DEFAULT);
-            this.logRetentionDays = parseHours(this.data.LOG_RETENTION_DAYS, LOG.RETENTION_DAYS_DEFAULT);
             this.loaded = true;
             logger.info('CONFIG', 'โหลด Config จาก Google Sheet สำเร็จ');
         } catch (error) {
@@ -82,8 +80,6 @@ export class ConfigService {
     getEditTagMode(): string { return this.editTagMode; }
     /** กี่ชั่วโมงที่ถือว่า "ยังอยู่ในกรอบที่คนแก้กันปกติ" — เกินกว่านี้แค่แจ้งเตือน ไม่ได้ห้าม */
     getEditAlertHours(): number { return this.editAlertHours; }
-    /** เก็บ log ในชีตไว้กี่วันก่อนลบของเก่าทิ้ง (0 = ไม่ลบเลย) */
-    getLogRetentionDays(): number { return this.logRetentionDays; }
     async writeConfigKeys(updates: [string, string][]): Promise<void> {
         const rows = await sheetService.getValues(SHEETS.CONFIG_SHEET_ID, `${SHEETS.CONFIG_SHEET_NAME}!A:B`, 0);
         const map = new Map<string, string>();

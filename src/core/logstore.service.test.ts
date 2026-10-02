@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     shouldPersist,
     formatSheetTime,
-    parseSheetTime,
-    countExpiredRows,
+    countRowsToDrop,
 } from './logstore.service';
 
 describe('shouldPersist — บรรทัดไหนควรเก็บลงชีต', () => {
@@ -33,7 +32,7 @@ describe('shouldPersist — บรรทัดไหนควรเก็บล�
     });
 });
 
-describe('เวลาในชีต — เขียนเป็นเวลาไทยและอ่านกลับได้', () => {
+describe('เวลาในชีต — เขียนเป็นเวลาไทย', () => {
     /** 2026-10-02 00:00:00 UTC = 07:00:00 ตามเวลาไทย */
     const utcMidnight = Date.UTC(2026, 9, 2, 0, 0, 0);
 
@@ -41,68 +40,53 @@ describe('เวลาในชีต — เขียนเป็นเวล�
         expect(formatSheetTime(utcMidnight)).toBe('2026-10-02 07:00:00');
     });
 
-    it('อ่านกลับได้ค่าเดิม (ไม่เพี้ยนไป 7 ชั่วโมง)', () => {
-        expect(parseSheetTime('2026-10-02 07:00:00')).toBe(utcMidnight);
-    });
-
-    it('เขียนแล้วอ่านกลับต้องได้เท่าเดิมเสมอ', () => {
-        for (const ms of [0, Date.UTC(2026, 0, 1, 16, 59, 59), Date.UTC(2025, 11, 31, 17, 0, 0)]) {
-            expect(parseSheetTime(formatSheetTime(ms))).toBe(ms);
-        }
-    });
-
-    it('รูปแบบที่ Google จัดแสดงเอง (ไม่เติมศูนย์หน้า) ต้องอ่านออกด้วย', () => {
-        // ถ้าเซลล์ไหนเคยถูกตีความเป็นค่าวันที่ Google จะคืน "3:47:11" ไม่ใช่ "03:47:11"
-        // ตัวอ่านต้องทน ไม่งั้นการลบ log เก่าจะหยุดที่แถวนั้นแล้วไม่ลบอะไรเลย
-        expect(parseSheetTime('2026-10-02 3:47:11')).toBe(parseSheetTime('2026-10-02 03:47:11'));
-        expect(parseSheetTime('2026-1-2 3:4:5')).toBe(parseSheetTime('2026-01-02 03:04:05'));
-    });
-
-    it('ค่าที่อ่านไม่ออก (คนพิมพ์มือ / ว่าง) → คืน null ไม่ใช่เดา', () => {
-        expect(parseSheetTime(undefined)).toBeNull();
-        expect(parseSheetTime('')).toBeNull();
-        expect(parseSheetTime('เมื่อวาน')).toBeNull();
-        expect(parseSheetTime('2026-10-02')).toBeNull();
-        expect(parseSheetTime('02/10/2026 07:00:00')).toBeNull();
+    it('เรียงตามตัวอักษรได้ผลเท่ากับเรียงตามเวลา — ทำให้แถวบนเก่าสุดเสมอ', () => {
+        const a = formatSheetTime(Date.UTC(2026, 0, 1, 16, 59, 59));
+        const b = formatSheetTime(Date.UTC(2026, 9, 2, 0, 0, 0));
+        expect(a < b).toBe(true);
     });
 });
 
-describe('countExpiredRows — นับแถวเก่าที่ลบได้', () => {
+describe('countRowsToDrop — เกินเพดานกี่แถว (ตัดจากบน)', () => {
     const t = (s: string) => [s];
     const HEADER = ['เวลา'];
+    const rowsOf = (n: number) => [HEADER, ...Array.from({ length: n }, (_, i) => t('row' + i))];
 
     it('ชีตมีแต่หัวตาราง → ไม่มีอะไรให้ลบ', () => {
-        expect(countExpiredRows([HEADER], Date.now())).toBe(0);
+        expect(countRowsToDrop([HEADER], 100)).toBe(0);
     });
 
-    it('เก่าทั้งหมด → ลบได้ทุกแถวข้อมูล แต่ไม่แตะหัวตาราง', () => {
-        const rows = [HEADER, t('2026-01-01 00:00:00'), t('2026-01-02 00:00:00')];
-        expect(countExpiredRows(rows, Date.UTC(2026, 5, 1))).toBe(2);
+    it('ชีตว่างเปล่าจริง ๆ (ยังไม่มีหัวตาราง) → ไม่ติดลบ', () => {
+        expect(countRowsToDrop([], 100)).toBe(0);
     });
 
-    it('ใหม่ทั้งหมด → ไม่ลบอะไรเลย', () => {
-        const rows = [HEADER, t('2026-10-01 00:00:00'), t('2026-10-02 00:00:00')];
-        expect(countExpiredRows(rows, Date.UTC(2026, 0, 1))).toBe(0);
+    it('ยังไม่ถึงเพดาน → ไม่ลบ', () => {
+        expect(countRowsToDrop(rowsOf(99), 100)).toBe(0);
     });
 
-    it('เก่าอยู่บน ใหม่อยู่ล่าง → หยุดนับตรงแถวแรกที่ยังไม่เก่า', () => {
-        const rows = [
-            HEADER,
-            t('2026-01-01 00:00:00'),
-            t('2026-01-02 00:00:00'),
-            t('2026-10-02 00:00:00'),
-            t('2026-10-03 00:00:00'),
-        ];
-        expect(countExpiredRows(rows, Date.UTC(2026, 5, 1))).toBe(2);
+    it('เท่าเพดานพอดี → ยังไม่ลบ', () => {
+        expect(countRowsToDrop(rowsOf(100), 100)).toBe(0);
     });
 
-    it('เจอแถวที่อ่านเวลาไม่ออก → หยุดทันที ปลอดภัยกว่าเดาแล้วลบของที่ยังต้องใช้', () => {
-        const rows = [HEADER, t('2026-01-01 00:00:00'), t('พิมพ์มือ'), t('2026-01-03 00:00:00')];
-        expect(countExpiredRows(rows, Date.UTC(2026, 5, 1))).toBe(1);
+    it('เกินเพดาน → ลบเท่าส่วนที่เกิน เหลือเท่าเพดานพอดี', () => {
+        expect(countRowsToDrop(rowsOf(101), 100)).toBe(1);
+        expect(countRowsToDrop(rowsOf(350), 100)).toBe(250);
     });
 
-    it('แถวว่างกลางทาง → หยุดเหมือนกัน ไม่ข้ามไปลบของหลังมัน', () => {
-        const rows = [HEADER, t('2026-01-01 00:00:00'), [], t('2026-01-03 00:00:00')];
-        expect(countExpiredRows(rows, Date.UTC(2026, 5, 1))).toBe(1);
+    it('ไม่นับหัวตารางเป็นข้อมูล — ไม่งั้นจะลบเกินไปหนึ่งแถวทุกครั้ง', () => {
+        // 101 แถวในชีต = หัวตาราง 1 + ข้อมูล 100 → ยังไม่เกินเพดาน 100
+        expect(rowsOf(100).length).toBe(101);
+        expect(countRowsToDrop(rowsOf(100), 100)).toBe(0);
+    });
+
+    it('เพดาน 0 หรือติดลบ → ถือว่าปิดการลบ ไม่ใช่ลบทิ้งทั้งแท็บ', () => {
+        expect(countRowsToDrop(rowsOf(500), 0)).toBe(0);
+        expect(countRowsToDrop(rowsOf(500), -5)).toBe(0);
+    });
+
+    it('ไม่สนใจเนื้อในเซลล์เลย — แถวที่อ่านเวลาไม่ออกก็ยังนับได้', () => {
+        // จุดสำคัญของการเปลี่ยนมาตัดตามจำนวนแถว: ของเดิมจะหยุดที่แถวแบบนี้แล้วไม่ลบอะไรอีก
+        const rows = [HEADER, t('พิมพ์มือ'), [], t('2026-10-02 00:00:00')];
+        expect(countRowsToDrop(rows, 2)).toBe(1);
     });
 });
