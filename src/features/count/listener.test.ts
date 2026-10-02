@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { diffTags, formatAge, planEdit, looksLikeDiscordId, resolveName, UNKNOWN_NAME, type NameSource } from './listener';
+import { diffTags, formatAge, planEdit, looksLikeDiscordId, resolveName, claimForCount, UNKNOWN_NAME, type NameSource } from './listener';
 import type { TagInfo } from '../../types/discord';
 
 const tag = (id: string): TagInfo => ({ id, nickname: `nick${id}`, username: `user${id}` });
@@ -179,5 +179,48 @@ describe('resolveName — ไล่หาชื่อ 3 ทาง', () => {
         };
         await resolveName(src, '111');
         expect(order).toEqual(['local', 'member', 'user']);
+    });
+});
+
+describe('claimForCount — จองใบก่อนเริ่มนับ (กันสองมือแย่งกัน)', () => {
+    /*
+     * บั๊กจริงที่เจอเมื่อ 2 ต.ค. 2026: ห้องนี้บอทโพสเอง และโพสมี embed
+     * Discord จึงยิง event "ข้อความถูกแก้" ตามมาติด ๆ ตอนประมวลผล embed เสร็จ
+     * ของเดิมเช็ค messageLog หลัง await ไป 2 จังหวะแล้ว ทำให้ฝั่งแก้ไขแทรกเข้ามาจดใบนี้ก่อนได้
+     * ผลคือใบนั้นติด ✅ แต่ไม่เคยได้ยอด — ต้องนับ 271 ครั้ง นับได้จริง 253 ขาด 18 (6.6%)
+     */
+    it('ใบใหม่ที่ยังไม่มีใครแตะ → จองได้ และถูกทำเครื่องหมายว่ากำลังทำอยู่', () => {
+        const counted = new Map<string, string[]>();
+        const inFlight = new Set<string>();
+        expect(claimForCount('m1', counted, inFlight)).toBe(true);
+        expect(inFlight.has('m1')).toBe(true);
+    });
+
+    it('ใบที่กำลังนับอยู่ → จองซ้ำไม่ได้ (กัน event ที่มาทีหลังแย่ง)', () => {
+        const counted = new Map<string, string[]>();
+        const inFlight = new Set<string>(['m1']);
+        expect(claimForCount('m1', counted, inFlight)).toBe(false);
+    });
+
+    it('ใบที่นับไปแล้วจริง ๆ → ไม่นับซ้ำ', () => {
+        const counted = new Map<string, string[]>([['m1', ['111']]]);
+        const inFlight = new Set<string>();
+        expect(claimForCount('m1', counted, inFlight)).toBe(false);
+        expect(inFlight.has('m1')).toBe(false);
+    });
+
+    it('ทำเสร็จแล้วปล่อยคืน → ใบอื่นยังจองได้ตามปกติ', () => {
+        const counted = new Map<string, string[]>();
+        const inFlight = new Set<string>();
+        expect(claimForCount('m1', counted, inFlight)).toBe(true);
+        inFlight.delete('m1');
+        expect(claimForCount('m2', counted, inFlight)).toBe(true);
+    });
+
+    it('เรียกซ้อนกันหลายครั้งพร้อมกัน → มีแค่ครั้งแรกที่ได้สิทธิ์', () => {
+        const counted = new Map<string, string[]>();
+        const inFlight = new Set<string>();
+        const results = [1, 2, 3, 4].map(() => claimForCount('m1', counted, inFlight));
+        expect(results).toEqual([true, false, false, false]);
     });
 });
