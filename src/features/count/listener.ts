@@ -5,6 +5,7 @@ import { processCountBatch, pendingCountOps } from './count.service';
 import { logger } from '../../core/logger';
 import { CACHE, COUNT } from '../../config';
 import type { TagInfo } from '../../types/discord';
+import { extractMentionIds } from '../../services/mentions';
 
 /**
  * จำว่าโพสไหนนับให้ใครไปแล้ว — เก็บเฉพาะ "รหัสคน" ไม่เก็บชื่อเล่น
@@ -118,6 +119,9 @@ export function looksLikeDiscordId(id: string): boolean {
 /** จำชื่อที่หามาได้ไว้ชั่วคราว — value = null คือเคยถามแล้วไม่ได้ */
 const nameCache = new Map<string, { value: ResolvedName | null; expires: number }>();
 
+/** เพดานจำนวนรายชื่อที่จำไว้ — กันหน่วยความจำบวมไม่หยุดในเซิร์ฟใหญ่ */
+const NAME_CACHE_MAX = 10000;
+
 function displayNameOf(m: { nickname: string | null; displayName: string; user: { username: string } }): ResolvedName {
     return {
         nickname: (m.nickname || m.displayName || m.user.username).trim(),
@@ -149,6 +153,15 @@ async function lookupName(guild: Guild, id: string): Promise<ResolvedName> {
 
     const found = await resolveName(nameSourceFor(guild), id);
     const ok = Boolean(found.nickname || found.username);
+    // กัน cache โตเกินเพดาน — ไล่ทิ้งของหมดอายุก่อน ถ้ายังเกินก็ทิ้งของเก่าสุด
+    if (nameCache.size >= NAME_CACHE_MAX) {
+        const now = Date.now();
+        for (const [key, entry] of nameCache) if (now >= entry.expires) nameCache.delete(key);
+        if (nameCache.size >= NAME_CACHE_MAX) {
+            const oldest = nameCache.keys().next().value;
+            if (oldest !== undefined) nameCache.delete(oldest);
+        }
+    }
     nameCache.set(id, {
         value: ok ? found : null,
         expires: Date.now() + (ok ? COUNT.NAME_CACHE_TTL_MS : COUNT.NAME_MISS_TTL_MS),
@@ -212,13 +225,7 @@ function logSummary(): void {
  */
 async function getTagsFromMessage(content: string, guild: Guild): Promise<TagInfo[]> {
     const tags: TagInfo[] = [];
-    const seen = new Set<string>();
-    const regex = /<@!?(\d+)>/g;
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(content)) !== null) {
-        const id = m[1];
-        if (seen.has(id)) continue;
-        seen.add(id);
+    for (const id of extractMentionIds(content)) {
         // ข้ามเลขที่ไม่ใช่ Discord ID — แต่ต้องบอกไว้ใน log ห้ามทิ้งแบบเงียบ ๆ
         if (!looksLikeDiscordId(id)) {
             logger.warn('นับเคส', `ข้ามแท็ก <@${id}> เพราะไม่ใช่ Discord ID (ต้องเป็นตัวเลข 17–20 หลัก)`);

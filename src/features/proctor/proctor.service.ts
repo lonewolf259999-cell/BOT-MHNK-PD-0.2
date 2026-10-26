@@ -5,6 +5,8 @@ import { logger } from '../../core/logger';
 import { locks } from '../../core/lock.service';
 import { sleep } from '../../services/utils';
 import { createRecentSet } from '../../services/recent-set';
+import { firstMentionId } from '../../services/mentions';
+import { markProcessed } from '../../services/reactions';
 
 /** กัน process message ซ้ำ (message.id เดียว) ภายใน 60 วินาที */
 const recentMessages = createRecentSet(60000);
@@ -34,18 +36,18 @@ async function sendProctorReport(ch: GuildTextBasedChannel, guild: Guild, embed:
     const discordIdRaw = getFieldValue(embed, 'Discord ID ผู้สอบ');
 
     // Resolve proctor mention
-    const proctorMatch = proctorRaw.match(/<@(\d+)>/);
+    const proctorId = firstMentionId(proctorRaw);
     let proctorVal = proctorRaw;
-    if (proctorMatch) {
-        const member = guild.members.cache.get(proctorMatch[1]) || await guild.members.fetch(proctorMatch[1]).catch(() => null);
+    if (proctorId) {
+        const member = guild.members.cache.get(proctorId) || await guild.members.fetch(proctorId).catch(() => null);
         proctorVal = member ? `<@${member.user.id}>` : proctorRaw;
     }
 
     // Resolve applicant Discord ID
-    const applicantMatch = discordIdRaw.match(/<@(\d+)>/);
+    const applicantId = firstMentionId(discordIdRaw);
     let applicantVal = discordIdRaw;
-    if (applicantMatch) {
-        const member = guild.members.cache.get(applicantMatch[1]) || await guild.members.fetch(applicantMatch[1]).catch(() => null);
+    if (applicantId) {
+        const member = guild.members.cache.get(applicantId) || await guild.members.fetch(applicantId).catch(() => null);
         applicantVal = member ? `<@${member.user.id}>` : discordIdRaw;
     }
 
@@ -92,17 +94,7 @@ export async function processProctor(message: Message): Promise<boolean> {
     }
 
     if (count > 0) {
-        try { await message.react('✅'); } catch (e) { logger.warn('PROCTOR', String(e)); }
-        if (count > 1) {
-            const emojiMap: Record<number, string> = {
-                2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣',
-                6: '6️⃣', 7: '7️⃣', 8: '8️⃣', 9: '9️⃣', 10: '🔟',
-            };
-            const emoji = emojiMap[count];
-            if (emoji) {
-                try { await message.react(emoji); } catch (e) { logger.warn('PROCTOR', String(e)); }
-            }
-        }
+        await markProcessed(message, count, 'PROCTOR');
         logger.info('PROCTOR', `ส่ง ${count} รายการ จากข้อความ ${message.id}`);
     }
 
